@@ -220,127 +220,121 @@ scene.add(sun.target);
 setLoad(0.1, 'Laying the streets…');
 
 // ============================================================
-//  WORLD LAYOUT
-//  A grid of blocks. Roads run along a grid; buildings fill blocks.
-//  BLOCK = building footprint size, ROAD = street width.
+//  MAYFAIR — a real, to-scale street layout (roughly Park Lane→Regent St,
+//  Oxford St→Piccadilly). Streets run at irregular spacing and width, with
+//  their real names; buildings between them carry real Mayfair shopfronts.
 // ============================================================
-const BLOCK = 44;
-const ROAD  = 16;
-const CELL  = BLOCK + ROAD;         // one grid cell
-const GRID  = 9;                    // GRID x GRID blocks (odd = centered)
-const HALF  = (GRID*CELL)/2;
 const roadY = 0.02;
+// vertical streets (run N–S): x centre, carriageway width, name
+const vStreets = [
+  {c:-250, w:26, name:'PARK LANE', main:true},
+  {c:-192, w:13, name:'PARK STREET'},
+  {c:-148, w:15, name:'SOUTH AUDLEY ST', main:true},
+  {c:-92,  w:14, name:'DAVIES STREET'},
+  {c:-34,  w:15, name:'BERKELEY STREET', main:true},
+  {c:46,   w:16, name:'NEW BOND STREET', main:true},
+  {c:116,  w:13, name:'ALBEMARLE ST'},
+  {c:200,  w:26, name:'REGENT STREET', main:true},
+];
+// horizontal streets (run E–W): z centre, width, name
+const hStreets = [
+  {c:-232, w:26, name:'OXFORD STREET', main:true},
+  {c:-178, w:14, name:'GROSVENOR ST'},
+  {c:-138, w:14, name:'BROOK STREET', main:true},
+  {c:-78,  w:15, name:'MOUNT STREET', main:true},
+  {c:-22,  w:13, name:'HILL STREET'},
+  {c:36,   w:16, name:'CURZON STREET', main:true},
+  {c:122,  w:26, name:'PICCADILLY', main:true},
+];
+const vLines = vStreets.map(s=>s.c), hLines = hStreets.map(s=>s.c);
+const vByC = {}, hByC = {}; vStreets.forEach(s=>vByC[s.c]=s); hStreets.forEach(s=>hByC[s.c]=s);
+const minX=vLines[0], maxX=vLines[vLines.length-1], minZ=hLines[0], maxZ=hLines[hLines.length-1];
+const midX=(minX+maxX)/2, midZ=(minZ+maxZ)/2;
+const HALF = Math.max(maxX-minX, maxZ-minZ)/2 + 60;   // for ground / bounds / minimap
+const worldBounds = { x0:minX-30, x1:maxX+30, z0:minZ-30, z1:maxZ+30 };
 
-// Block centres sit at i*CELL (i = -4..4). Roads run BETWEEN blocks,
-// at the half-cell offsets (i+0.5)*CELL, so they never overlap buildings.
-const roadLines = [];
-for (let i = -Math.ceil(GRID/2)-1; i <= Math.ceil(GRID/2); i++){
-  const c = (i + 0.5) * CELL;
-  if (c >= -HALF-1 && c <= HALF+1) roadLines.push(c);
-}
 // A small deterministic PRNG so the city is stable each load
-let seed = 1337;
+let seed = 20240607;
 function rnd(){ seed = (seed*1664525 + 1013904223) & 0xffffffff; return ((seed>>>0)/4294967296); }
 
-function nearestRoadCenter(v){ return (Math.round(v/CELL - 0.5) + 0.5) * CELL; }
-function onRoad(x, z){
-  const dx = Math.abs(x - nearestRoadCenter(x));
-  const dz = Math.abs(z - nearestRoadCenter(z));
-  return dx < ROAD/2 + 0.5 || dz < ROAD/2 + 0.5;
-}
-
-// ---------- Ground ----------
+// ---------- Ground (Mayfair pavement) ----------
 {
-  const g = new THREE.PlaneGeometry(GRID*CELL+400, GRID*CELL+400);
-  const m = new THREE.MeshStandardMaterial({ color: 0x3f4a3a, roughness: 1 });
+  const g = new THREE.PlaneGeometry((maxX-minX)+300, (maxZ-minZ)+300);
+  const m = new THREE.MeshStandardMaterial({ color: 0x5f646c, roughness: 1, envMapIntensity:0.12 }); // paving
   const ground = new THREE.Mesh(g, m);
-  ground.rotation.x = -Math.PI/2;
-  ground.position.y = -0.02;
-  ground.receiveShadow = true;
-  scene.add(ground);
+  ground.rotation.x = -Math.PI/2; ground.position.set(midX,-0.02,midZ);
+  ground.receiveShadow = true; scene.add(ground);
 }
 
 // ---------- Roads (asphalt) with lane markings ----------
-// Two kinds of street so the map doesn't feel uniform:
-//  · main avenues  — darker/busier tarmac, a crisp white centre line
-//  · side streets  — lighter tarmac, no centre line, double-yellow kerb lines
-// asphalt grain — a noise bump so tarmac catches light instead of reading flat
 const asphaltBump = (()=>{ const c=document.createElement('canvas'); c.width=c.height=128; const x=c.getContext('2d');
   const im=x.createImageData(128,128); for(let i=0;i<im.data.length;i+=4){ const v=140+Math.random()*70; im.data[i]=im.data[i+1]=im.data[i+2]=v; im.data[i+3]=255; }
   x.putImageData(im,0,0); const t=new THREE.CanvasTexture(c); t.wrapS=t.wrapT=THREE.RepeatWrapping; t.repeat.set(60,60); return t; })();
-const mainMat = new THREE.MeshStandardMaterial({ color: 0x30353b, roughness: 0.72, metalness: 0.0, bumpMap: asphaltBump, bumpScale: 0.06, envMapIntensity: 0.5 });
-const sideMat = new THREE.MeshStandardMaterial({ color: 0x40464e, roughness: 0.8, metalness: 0.0, bumpMap: asphaltBump, bumpScale: 0.06, envMapIntensity: 0.4 });
-const lineMat = new THREE.MeshStandardMaterial({ color: 0xe9edf0, roughness: 0.5 });    // UK white lines
-const yellowMat= new THREE.MeshStandardMaterial({ color: 0xE7B93A, roughness: 0.6 });    // double-yellow (no parking)
+const mainMat = new THREE.MeshStandardMaterial({ color: 0x30353b, roughness: 0.72, bumpMap: asphaltBump, bumpScale: 0.06, envMapIntensity: 0.5 });
+const sideMat = new THREE.MeshStandardMaterial({ color: 0x3d434b, roughness: 0.8, bumpMap: asphaltBump, bumpScale: 0.06, envMapIntensity: 0.4 });
+const lineMat = new THREE.MeshStandardMaterial({ color: 0xe9edf0, roughness: 0.5 });
+const yellowMat= new THREE.MeshStandardMaterial({ color: 0xE7B93A, roughness: 0.6 });
 const pavementMat = new THREE.MeshStandardMaterial({ color: 0x9aa0a8, roughness: 1 });
-
-// every third grid line is a "main" avenue
-const mainRoads = new Set(roadLines.filter((_,i)=> i%3===0));
-const isMain = c => mainRoads.has(c);
+const isMain = c => (vByC[c] && vByC[c].main) || (hByC[c] && hByC[c].main);
 
 const roadGroup = new THREE.Group(); scene.add(roadGroup);
-const roadSpan = 2*HALF + ROAD;
-const dashGeo = new THREE.PlaneGeometry(0.5, 4);
 const flatXZ = -Math.PI/2;
-
+const spanX = (worldBounds.x1-worldBounds.x0), spanZ = (worldBounds.z1-worldBounds.z0);
 function addFlat(geo, mat, x, z, rotY){
   const m = new THREE.Mesh(geo, mat);
   m.rotation.x = flatXZ; if(rotY) m.rotation.z = rotY;
   m.position.set(x, roadY+0.012, z); roadGroup.add(m); return m;
 }
-
-for (const c of roadLines){
-  const main = isMain(c);
-  const mat = main ? mainMat : sideMat;
-  // horizontal road (runs along X) at z = c
-  const hz = new THREE.Mesh(new THREE.PlaneGeometry(roadSpan, ROAD), mat);
-  hz.rotation.x = flatXZ; hz.position.set(0, roadY, c); hz.receiveShadow = true; roadGroup.add(hz);
-  // vertical road (runs along Z) at x = c
-  const vt = new THREE.Mesh(new THREE.PlaneGeometry(ROAD, roadSpan), mat);
-  vt.rotation.x = flatXZ; vt.position.set(c, roadY, 0); vt.receiveShadow = true; roadGroup.add(vt);
-
-  if (main){
-    // solid continuous white centre line, both directions
-    addFlat(new THREE.PlaneGeometry(roadSpan, 0.5), lineMat, 0, c, 0);
-    addFlat(new THREE.PlaneGeometry(0.5, roadSpan), lineMat, c, 0, 0);
-  } else {
-    // double-yellow lines just inside each kerb, both directions
-    for (const off of [-1, 1]){
-      const e = off*(ROAD/2 - 1.1);
-      addFlat(new THREE.PlaneGeometry(roadSpan, 0.28), yellowMat, 0, c+e, 0);
-      addFlat(new THREE.PlaneGeometry(roadSpan, 0.28), yellowMat, 0, c+e+off*0.5, 0);
-      addFlat(new THREE.PlaneGeometry(0.28, roadSpan), yellowMat, c+e, 0, 0);
-      addFlat(new THREE.PlaneGeometry(0.28, roadSpan), yellowMat, c+e+off*0.5, 0, 0);
+function markings(len, w, main, vertical){
+  // vertical=true → street runs along Z (markings along Z); returns builder using centre coord c
+  return (c)=>{
+    if(main){ // white centre line
+      if(vertical) addFlat(new THREE.PlaneGeometry(0.5,len), lineMat, c, midZ, 0);
+      else addFlat(new THREE.PlaneGeometry(len,0.5), lineMat, midX, c, 0);
+    } else { // double-yellow near each kerb
+      for(const off of [-1,1]){ const e=off*(w/2-1.1);
+        if(vertical){ addFlat(new THREE.PlaneGeometry(0.28,len), yellowMat, c+e, midZ,0); addFlat(new THREE.PlaneGeometry(0.28,len), yellowMat, c+e+off*0.5, midZ,0); }
+        else { addFlat(new THREE.PlaneGeometry(len,0.28), yellowMat, midX, c+e,0); addFlat(new THREE.PlaneGeometry(len,0.28), yellowMat, midX, c+e+off*0.5,0); }
+      }
     }
-  }
+  };
+}
+// vertical streets
+for(const s of vStreets){
+  const vt=new THREE.Mesh(new THREE.PlaneGeometry(s.w, spanZ), s.main?mainMat:sideMat);
+  vt.rotation.x=flatXZ; vt.position.set(s.c, roadY, midZ); vt.receiveShadow=true; roadGroup.add(vt);
+  markings(spanZ, s.w, s.main, true)(s.c);
+}
+// horizontal streets
+for(const s of hStreets){
+  const hz=new THREE.Mesh(new THREE.PlaneGeometry(spanX, s.w), s.main?mainMat:sideMat);
+  hz.rotation.x=flatXZ; hz.position.set(midX, roadY, s.c); hz.receiveShadow=true; roadGroup.add(hz);
+  markings(spanX, s.w, s.main, false)(s.c);
 }
 
-// Zebra crossings + Belisha beacons where two main avenues meet
+// Zebra crossings + Belisha beacons at the busy junctions
 function belisha(x, z){
   const g = new THREE.Group();
-  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.12,0.12,4.2,8),
-    new THREE.MeshStandardMaterial({color:0x222, roughness:0.6}));
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.12,0.12,4.2,8), new THREE.MeshStandardMaterial({color:0x222, roughness:0.6}));
   pole.position.y=2.1; g.add(pole);
-  const globe = new THREE.Mesh(new THREE.SphereGeometry(0.5,14,12),
-    new THREE.MeshStandardMaterial({color:0xff8a00, emissive:0xff7a00, emissiveIntensity:1.1}));
+  const globe = new THREE.Mesh(new THREE.SphereGeometry(0.5,14,12), new THREE.MeshStandardMaterial({color:0xff8a00, emissive:0xff7a00, emissiveIntensity:1.1}));
   globe.position.y=4.5; g.add(globe);
   g.position.set(x,0,z); roadGroup.add(g);
 }
-function addZebra(cx, cz){
-  // white stripes across each of the four approaches
-  const stripeGeo = new THREE.PlaneGeometry(1.1, ROAD-2);
+function addZebra(cx, cz, wv, wh){
+  const stripeGeo = new THREE.PlaneGeometry(1.1, Math.min(wv,wh)-2);
   for (let s=-3; s<=3; s++){
-    addFlat(stripeGeo, lineMat, cx + s*1.9, cz - ROAD/2 - 3.2, 0); // north approach (along X)
-    addFlat(stripeGeo, lineMat, cx + s*1.9, cz + ROAD/2 + 3.2, 0); // south
-    addFlat(stripeGeo, lineMat, cx - ROAD/2 - 3.2, cz + s*1.9, Math.PI/2); // west (along Z)
-    addFlat(stripeGeo, lineMat, cx + ROAD/2 + 3.2, cz + s*1.9, Math.PI/2); // east
+    addFlat(stripeGeo, lineMat, cx + s*1.9, cz - wh/2 - 3.2, 0);
+    addFlat(stripeGeo, lineMat, cx + s*1.9, cz + wh/2 + 3.2, 0);
+    addFlat(stripeGeo, lineMat, cx - wv/2 - 3.2, cz + s*1.9, Math.PI/2);
+    addFlat(stripeGeo, lineMat, cx + wv/2 + 3.2, cz + s*1.9, Math.PI/2);
   }
-  belisha(cx - ROAD/2 - 2, cz - ROAD/2 - 2);
-  belisha(cx + ROAD/2 + 2, cz + ROAD/2 + 2);
+  belisha(cx - wv/2 - 2, cz - wh/2 - 2);
+  belisha(cx + wv/2 + 2, cz + wh/2 + 2);
 }
-for (const x of mainRoads){ for (const z of mainRoads){
-  if (rnd() < 0.5) addZebra(x, z);
-}}
+for(const v of vStreets) for(const h of hStreets){
+  if(v.main && h.main && rnd()<0.55) addZebra(v.c, h.c, v.w, h.w);
+}
 
 setLoad(0.22, 'Painting the roads…');
 
@@ -446,98 +440,29 @@ function addPitchedRoof(parent, bx, bz, w, d, baseY, col){
   ch.castShadow=true; parent.add(ch);
 }
 
-// reserved cells for landmarks (grid coordinates i,j from -(GRID-1)/2 .. )
-const reserved = new Set();
-function key(i,j){ return i+','+j; }
+const landmarks = []; // {name,x,z,r} for place-name notifications (filled below)
 
-// place landmarks first (choose a few blocks)
-const g0 = -(GRID-1)/2;
-const landmarkPlan = [
-  { i: g0+2, j: g0+2, type:'bigben' },
-  { i: g0+6, j: g0+3, type:'eye' },
-  { i: g0+4, j: g0+6, type:'stpauls' },
-  { i: g0+7, j: g0+7, type:'shard' },
-  { i: g0+6, j: g0+6, type:'gherkin' },
-  { i: g0+3, j: g0+4, type:'park' },
-  { i: g0+5, j: g0+1, type:'towerbridge' },
-  { i: g0+1, j: g0+2, type:'square', name:'Berkeley Square' },
-  { i: g0+2, j: g0+5, type:'square', name:'Grosvenor Square' },
-];
-landmarkPlan.forEach(l=>reserved.add(key(l.i,l.j)));
-
-// Mayfair — a hand-built district of elegant Georgian stucco terraces lining
-// Curzon Street. These blocks are reserved from the generic city fill.
-const mayfairCells = [];
-for (let i=g0; i<=g0+2; i++){ for (let j=g0+7; j<=g0+8; j++){ mayfairCells.push([i,j]); reserved.add(key(i,j)); } }
-const curzonZ = (g0+7.5)*CELL; // the road between the two Mayfair rows
-
-function blockCenter(i,j){ return { x: i*CELL, z: j*CELL }; }
-
-// The "City of London" financial cluster — glass towers live only here, near
-// the Gherkin & Shard. Everywhere else is low-rise London brick & stone.
-function isCity(i,j){ return (i >= g0+5) && (j >= g0+5); }
-
-// fill ordinary blocks with clusters of buildings
-for (let i = g0; i <= (GRID-1)/2; i++){
-  for (let j = g0; j <= (GRID-1)/2; j++){
-    if (reserved.has(key(i,j))) continue;
-    const { x, z } = blockCenter(i,j);
-    const city = isCity(i,j);
-    // terraces subdivide more (row of houses); City blocks are single towers
-    const div = city ? (rnd()<0.5?1:2) : (rnd() < 0.6 ? 2 : 1);
-    const sub = BLOCK / div;
-    for (let a=0;a<div;a++){
-      for (let b=0;b<div;b++){
-        if (div===2 && rnd()<0.1) continue; // occasional gap / courtyard
-        const pad = 2 + rnd()*2;
-        const w = sub - pad, d = sub - pad;
-        const bx = x - BLOCK/2 + sub*(a+0.5);
-        const bz = z - BLOCK/2 + sub*(b+0.5);
-
-        if (city){
-          // tall glass tower
-          const h = 34 + Math.pow(rnd(),1.3)*54;
-          const col = glassColors[(rnd()*glassColors.length)|0];
-          const mesh = new THREE.Mesh(boxGeo(w,h,d), facadeMat(col, w, h, 'glass'));
-          mesh.position.set(bx, h/2, bz); mesh.castShadow=true; mesh.receiveShadow=true;
-          buildingGroup.add(mesh);
-          const cap = new THREE.Mesh(boxGeo(w*0.7,1.4,d*0.7), new THREE.MeshStandardMaterial({color:slate, roughness:0.7, metalness:0.4}));
-          cap.position.set(bx, h+0.7, bz); buildingGroup.add(cap);
-          // dark stone lobby plinth
-          const pl = new THREE.Mesh(boxGeo(w+0.3,3,d+0.3), new THREE.MeshStandardMaterial({color:0x2b2f36, roughness:0.6, metalness:0.3}));
-          pl.position.set(bx,1.5,bz); buildingGroup.add(pl);
-        } else {
-          // low-rise London brick/stone terrace (3–7 storeys)
-          const storeys = 3 + (rnd()*5|0);
-          const h = storeys * 3.4;
-          const p = facadePalette[(rnd()*facadePalette.length)|0];
-          const mesh = new THREE.Mesh(boxGeo(w,h,d), facadeMat(p.c, w, h, p.k));
-          mesh.position.set(bx, h/2+1, bz); mesh.castShadow=true; mesh.receiveShadow=true;
-          buildingGroup.add(mesh);
-          // ground-floor plinth/shopfront band (darker) — breaks the flat box
-          const plinthCol = (p.k==='stucco'||p.k==='stone') ? 0x6f6a60 : 0x59504a;
-          const plinth = new THREE.Mesh(boxGeo(w+0.35, 2.2, d+0.35), new THREE.MeshStandardMaterial({color:plinthCol, roughness:0.8}));
-          plinth.position.set(bx, 1.1, bz); plinth.castShadow=true; buildingGroup.add(plinth);
-          // white cornice
-          const cor = new THREE.Mesh(boxGeo(w+0.6, 0.8, d+0.6), new THREE.MeshStandardMaterial({color:0xf1ece0, roughness:0.85}));
-          cor.position.set(bx, h+1.4, bz); cor.castShadow=true; buildingGroup.add(cor);
-          if (storeys <= 5){
-            addPitchedRoof(buildingGroup, bx, bz, w+0.6, d+0.6, h+1.8, rnd()<0.6?slate:terracotta);
-          } else {
-            const para = new THREE.Mesh(boxGeo(w+0.6,1.4,d+0.6), new THREE.MeshStandardMaterial({color:0xe9e3d6, roughness:0.9}));
-            para.position.set(bx, h+2.1, bz); buildingGroup.add(para);
-          }
-        }
-        colliders.push({ x:bx, z:bz, hw:w/2, hd:d/2 });
-      }
-    }
-  }
+// ---------- street signs (white plate, red Westminster header), cached ----------
+const signTexCache={};
+function signTexture(text, sub){
+  const k=text+'|'+sub; if(signTexCache[k]) return signTexCache[k];
+  const c=document.createElement('canvas'); c.width=256; c.height=88; const x=c.getContext('2d');
+  x.fillStyle='#f4f2ec'; x.fillRect(0,0,256,88); x.fillStyle='#a01c2c'; x.fillRect(0,0,256,20);
+  x.fillStyle='#fff'; x.font='bold 12px Arial'; x.textAlign='center'; x.fillText(sub,128,14);
+  x.fillStyle='#111'; x.font='bold 30px Georgia'; x.fillText(text,128,58);
+  x.strokeStyle='#111'; x.lineWidth=3; x.strokeRect(2,22,252,64);
+  return signTexCache[k]=new THREE.CanvasTexture(c);
+}
+function makeStreetSign(text, sub){
+  const t=signTexture(text, sub||'CITY OF WESTMINSTER · W1');
+  const g=new THREE.Group();
+  const post=new THREE.Mesh(new THREE.CylinderGeometry(0.1,0.1,3.4,8), new THREE.MeshStandardMaterial({color:0x2a2a2e, metalness:0.4, roughness:0.6})); post.position.y=1.7; g.add(post);
+  const plate=new THREE.Mesh(new THREE.BoxGeometry(3.6,1.25,0.1), new THREE.MeshStandardMaterial({map:t, roughness:0.6})); plate.position.y=3.4; g.add(plate);
+  const back=new THREE.Mesh(new THREE.BoxGeometry(3.6,1.25,0.06), new THREE.MeshStandardMaterial({map:t, roughness:0.6})); back.position.set(0,3.4,0.06); back.rotation.y=Math.PI; g.add(back);
+  return g;
 }
 
-// ============================================================
-//  MAYFAIR · CURZON STREET — a hand-built Georgian district
-// ============================================================
-// black cast-iron railing texture (bars on transparent) for the pavement fronts
+// ---------- cast-iron railings + porticoed door (reused by squares) ----------
 const railTex = (()=>{ const c=document.createElement('canvas'); c.width=32;c.height=16; const x=c.getContext('2d');
   x.clearRect(0,0,32,16); x.strokeStyle='#0a0a0c'; x.lineWidth=2;
   for(let i=2;i<32;i+=5){ x.beginPath();x.moveTo(i,1);x.lineTo(i,16);x.stroke(); }
@@ -553,89 +478,164 @@ const columnMat=new THREE.MeshStandardMaterial({color:0xf3efe6, roughness:0.7});
 const doorMat=new THREE.MeshStandardMaterial({color:0x14312a, roughness:0.5});
 function makePortico(){
   const g=new THREE.Group();
-  for(const sx of [-1.1,1.1]){ const col=new THREE.Mesh(new THREE.CylinderGeometry(0.28,0.32,4,12), columnMat); col.position.set(sx,2,0); col.castShadow=true; g.add(col); }
-  const ent=new THREE.Mesh(new THREE.BoxGeometry(3.2,0.6,1.2), columnMat); ent.position.set(0,4.3,0); g.add(ent);
-  const door=new THREE.Mesh(new THREE.BoxGeometry(1.5,3.2,0.2), doorMat); door.position.set(0,1.6,-0.4); g.add(door);
-  const fan=new THREE.Mesh(new THREE.CircleGeometry(0.75,16,0,Math.PI), new THREE.MeshStandardMaterial({color:0x1a2630, emissive:0x24303a, emissiveIntensity:0.4})); fan.position.set(0,3.2,-0.29); g.add(fan);
-  const step=new THREE.Mesh(new THREE.BoxGeometry(3,0.3,1.4), new THREE.MeshStandardMaterial({color:0xd9d3c6, roughness:0.9})); step.position.set(0,0.15,0.3); g.add(step);
+  for(const sx of [-1.1,1.1]){ const col=new THREE.Mesh(new THREE.CylinderGeometry(0.26,0.3,3.6,12), columnMat); col.position.set(sx,1.8,0); col.castShadow=true; g.add(col); }
+  const ent=new THREE.Mesh(new THREE.BoxGeometry(3.0,0.5,1.1), columnMat); ent.position.set(0,3.85,0); g.add(ent);
+  const door=new THREE.Mesh(new THREE.BoxGeometry(1.4,3.0,0.2), doorMat); door.position.set(0,1.5,-0.4); g.add(door);
+  const step=new THREE.Mesh(new THREE.BoxGeometry(2.8,0.3,1.3), new THREE.MeshStandardMaterial({color:0xd9d3c6, roughness:0.9})); step.position.set(0,0.15,0.3); g.add(step);
   return g;
 }
-const stuccoMayfair = new THREE.MeshStandardMaterial({color:0xeee9dd, roughness:0.85});
-function buildMayfairBlock(i,j){
-  const {x,z}=blockCenter(i,j);
-  const w=BLOCK-4, d=BLOCK-4, storeys=5, h=storeys*3.4;
-  const mesh=new THREE.Mesh(boxGeo(w,h,d), facadeMat(0xece7db, w, h, 'stucco'));
-  mesh.position.set(x, h/2+1.4, z); mesh.castShadow=true; mesh.receiveShadow=true; buildingGroup.add(mesh);
-  // rusticated stucco ground floor
-  const gf=new THREE.Mesh(boxGeo(w+0.3,2.8,d+0.3), stuccoMayfair); gf.position.set(x,1.4,z); gf.castShadow=true; buildingGroup.add(gf);
-  // strong cornice + balustrade parapet
-  const cor=new THREE.Mesh(boxGeo(w+0.9,0.9,d+0.9), new THREE.MeshStandardMaterial({color:0xf5f1e6, roughness:0.8})); cor.position.set(x,h+1.9,z); cor.castShadow=true; buildingGroup.add(cor);
-  const para=new THREE.Mesh(boxGeo(w+0.5,1.1,d+0.5), stuccoMayfair); para.position.set(x,h+2.9,z); buildingGroup.add(para);
-  // chimney stacks
-  for(const sx of [-1,1]){ const ch=new THREE.Mesh(boxGeo(1.4,2.6,3.2), new THREE.MeshStandardMaterial({color:0xb9a58c, roughness:1})); ch.position.set(x+sx*w*0.3, h+4.2, z); ch.castShadow=true; buildingGroup.add(ch); }
-  colliders.push({x, z, hw:w/2, hd:d/2});
-  // frontage details on the Curzon-Street-facing side
-  const faceZ = z < curzonZ ? z + d/2 + 1.6 : z - d/2 - 1.6;   // pavement edge toward Curzon St
-  const dir   = z < curzonZ ? 1 : -1;
-  const rail=makeRailings(w); rail.position.set(x, 0, faceZ); buildingGroup.add(rail);
-  for(const off of [-w*0.28, 0, w*0.28]){
-    const p=makePortico(); p.position.set(x+off, 0, z + dir*(d/2)); if(dir<0) p.rotation.y=Math.PI; buildingGroup.add(p);
-  }
-  // a couple of plane trees + planters on the pavement
-  for(const off of [-w*0.4, w*0.4]){ const t=makeTree(x+off, faceZ+dir*0.8); buildingGroup.add(t); }
-}
-mayfairCells.forEach(([i,j])=> buildMayfairBlock(i,j));
 
-// Curzon Street sign (white plate, red Westminster header) — texture cached per name
-const signTexCache={};
-function signTexture(text, sub){
-  const k=text+'|'+sub; if(signTexCache[k]) return signTexCache[k];
-  const c=document.createElement('canvas'); c.width=256; c.height=88; const x=c.getContext('2d');
-  x.fillStyle='#f4f2ec'; x.fillRect(0,0,256,88); x.fillStyle='#a01c2c'; x.fillRect(0,0,256,20);
-  x.fillStyle='#fff'; x.font='bold 12px Arial'; x.textAlign='center'; x.fillText(sub,128,14);
-  x.fillStyle='#111'; x.font='bold 34px Georgia'; x.fillText(text,128,58);
-  x.strokeStyle='#111'; x.lineWidth=3; x.strokeRect(2,22,252,64);
-  return signTexCache[k]=new THREE.CanvasTexture(c);
+// ============================================================
+//  SHOPFRONTS — real Mayfair businesses on the right streets
+// ============================================================
+const shopStyles = {
+  luxury:     { bg:'#0e0e10', fg:'#d7b35f' },                 // gold on black
+  dining:     { bg:'#173a2f', fg:'#f0e8d6', awning:0x7a1e24 },// green fascia, burgundy awning
+  hotel:      { bg:'#1a2340', fg:'#e9d9a8', awning:0x22305a },// navy & gold
+  curzon:     { bg:'#3a2b23', fg:'#f2e6cf' },
+  piccadilly: { bg:'#123', fg:'#e7c9a0' },
+  highstreet: { bg:'#7a1420', fg:'#ffffff' },
+  market:     { bg:'#2a2018', fg:'#e9d3a8', awning:0x2f5f3a },
+};
+const shopPools = {
+  luxury: ['LOUIS VUITTON','CARTIER','TIFFANY & CO.','CHANEL','GUCCI','PRADA','BULGARI','BURBERRY','RALPH LAUREN','DOLCE & GABBANA','SMYTHSON','OMEGA','ROLEX','VAN CLEEF & ARPELS'],
+  dining: ['SCOTT’S','THE AUDLEY','SEXY FISH','NOBU','CECCONI’S','HAKKASAN','KITTY FISHER’S','BENARES'],
+  curzon: ['THE CURZON','HEYWOOD HILL','CROCKFORDS','G. F. TRUMPER','MAYFAIR NEWS'],
+  piccadilly: ['THE RITZ','FORTNUM & MASON','HATCHARDS','THE WOLSELEY'],
+  highstreet: ['SELFRIDGES','ZARA','NIKE','JD SPORTS','HMV','H&M','WATERSTONES'],
+  market: ['YE GRAPES','KING’S ARMS','L’AUTRE','SHEPHERD CAFÉ','KITTY FISHER’S'],
+};
+const fasciaCache={};
+function fasciaTexture(name, style){
+  const k=name+'|'+style; if(fasciaCache[k]) return fasciaCache[k];
+  const st=shopStyles[style]||shopStyles.luxury;
+  const c=document.createElement('canvas'); c.width=256; c.height=44; const x=c.getContext('2d');
+  x.fillStyle=st.bg; x.fillRect(0,0,256,44);
+  x.fillStyle=st.fg; let fs=25; x.font='bold '+fs+'px Georgia'; x.textAlign='center'; x.textBaseline='middle';
+  while(x.measureText(name).width>240 && fs>11){ fs--; x.font='bold '+fs+'px Georgia'; }
+  x.fillText(name,128,24);
+  return fasciaCache[k]=new THREE.CanvasTexture(c);
 }
-function makeStreetSign(text, sub){
-  const t=signTexture(text, sub);
+function makeShopfront(name, width, style){
+  const st=shopStyles[style]||shopStyles.luxury;
   const g=new THREE.Group();
-  const post=new THREE.Mesh(new THREE.CylinderGeometry(0.1,0.1,3.4,8), new THREE.MeshStandardMaterial({color:0x2a2a2e, metalness:0.4, roughness:0.6})); post.position.y=1.7; g.add(post);
-  const plate=new THREE.Mesh(new THREE.BoxGeometry(3.4,1.2,0.1), new THREE.MeshStandardMaterial({map:t, roughness:0.6})); plate.position.y=3.4; g.add(plate);
-  const back=new THREE.Mesh(new THREE.BoxGeometry(3.4,1.2,0.06), new THREE.MeshStandardMaterial({map:t, roughness:0.6})); back.position.set(0,3.4,0.06); back.rotation.y=Math.PI; g.add(back);
+  const glass=new THREE.Mesh(new THREE.BoxGeometry(width,2.5,0.25), new THREE.MeshStandardMaterial({color:0x101a24, roughness:0.08, metalness:0.55, envMapIntensity:1.3}));
+  glass.position.set(0,1.35,0); g.add(glass);
+  const fascia=new THREE.Mesh(new THREE.BoxGeometry(width,0.92,0.32), new THREE.MeshStandardMaterial({map:fasciaTexture(name,style), roughness:0.55}));
+  fascia.position.set(0,2.95,0.06); g.add(fascia);
+  if(st.awning){ const aw=new THREE.Mesh(new THREE.BoxGeometry(width,0.14,1.3), new THREE.MeshStandardMaterial({color:st.awning, roughness:0.7})); aw.position.set(0,2.45,0.72); aw.rotation.x=-0.28; g.add(aw); }
   return g;
 }
-{
-  const sign=makeStreetSign('CURZON STREET','CITY OF WESTMINSTER  ·  W1');
-  sign.position.set((g0+2)*CELL + CELL/2 - 2, 0, curzonZ - ROAD/2 - 1.5);
-  buildingGroup.add(sign);
+
+// ============================================================
+//  MAYFAIR BLOCKS — fill the rectangles between the real streets
+// ============================================================
+function shopKindFor(name){
+  if(/BOND|ALBEMARLE|REGENT/.test(name)) return 'luxury';
+  if(/MOUNT/.test(name)) return 'dining';
+  if(/CURZON/.test(name)) return 'curzon';
+  if(/PICCADILLY/.test(name)) return 'piccadilly';
+  if(/OXFORD/.test(name)) return 'highstreet';
+  return null;
+}
+const shopPri = { luxury:5, dining:4, piccadilly:3, curzon:2, highstreet:1 };
+let shopSeed=0;
+function pickShop(kind){ const pool=shopPools[kind]||shopPools.luxury; return pool[(shopSeed++)%pool.length]; }
+
+// blocks reserved for hand-built landmarks (by block index "bi,bj")
+const bkOf=(bi,bj)=>bi+','+bj;
+const landmarkBlocks = {
+  // gardens
+  '3,3': {type:'square', name:'Berkeley Square'},
+  '2,1': {type:'square', name:'Grosvenor Square'},
+  '4,5': {type:'market', name:'Shepherd Market'},
+};
+const hotelBlocks = {
+  '3,2': 'CLARIDGE’S',
+  '2,3': 'THE CONNAUGHT',
+  '0,3': 'THE DORCHESTER',
+};
+
+function placeShopRow(cx, cz, side, faceLen, kind){
+  const n = Math.max(1, Math.min(6, Math.floor(faceLen/12)));
+  const sw = faceLen/n - 1.0;
+  for(let i=0;i<n;i++){
+    const t = -faceLen/2 + faceLen*(i+0.5)/n;
+    const shop = makeShopfront(pickShop(kind), sw, kind);
+    if(side==='z0'){ shop.position.set(cx+t, 0, cz-0.15); shop.rotation.y=Math.PI; }
+    else if(side==='z1'){ shop.position.set(cx+t, 0, cz+0.15); }
+    else if(side==='x0'){ shop.position.set(cx-0.15, 0, cz+t); shop.rotation.y=-Math.PI/2; }
+    else { shop.position.set(cx+0.15, 0, cz+t); shop.rotation.y=Math.PI/2; }
+    buildingGroup.add(shop);
+  }
 }
 
-// Real central-London street names on the main avenues so every road reads as
-// somewhere, not a repeat. Names run along each main road; the label a driver
-// sees names the road they're on.
-const londonHStreets = ['OXFORD STREET','PICCADILLY','THE STRAND','PALL MALL','MARYLEBONE ROAD','KNIGHTSBRIDGE','FLEET STREET','SHAFTESBURY AVENUE'];
-const londonVStreets = ['REGENT STREET','PARK LANE','BOND STREET','WHITEHALL','BAKER STREET','VICTORIA STREET','CHARING CROSS ROAD','SLOANE STREET'];
-const boroughs = ['CITY OF WESTMINSTER','ROYAL BOROUGH OF K&C','CITY OF LONDON','CAMDEN'];
-const mainList = roadLines.filter(isMain);
-// name every main junction so signs are spread across the whole map
-mainList.forEach((zc, zi)=>{
-  mainList.forEach((xc, xi)=>{
-    const hs = makeStreetSign(londonHStreets[zi%londonHStreets.length], boroughs[zi%boroughs.length]);
-    hs.position.set(xc + ROAD/2 + 2, 0, zc - ROAD/2 - 2); hs.rotation.y = Math.PI/2; buildingGroup.add(hs);
-    const vs = makeStreetSign(londonVStreets[xi%londonVStreets.length], boroughs[(xi+1)%boroughs.length]);
-    vs.position.set(xc - ROAD/2 - 2, 0, zc + ROAD/2 + 2); buildingGroup.add(vs);
-  });
-});
+for(let bi=0; bi<vStreets.length-1; bi++){
+  for(let bj=0; bj<hStreets.length-1; bj++){
+    const vA=vStreets[bi], vB=vStreets[bi+1], hA=hStreets[bj], hB=hStreets[bj+1];
+    const x0=vA.c+vA.w/2, x1=vB.c-vB.w/2, z0=hA.c+hA.w/2, z1=hB.c-hB.w/2;
+    const bw=x1-x0, bd=z1-z0; if(bw<8||bd<8) continue;
+    const cx=(x0+x1)/2, cz=(z0+z1)/2;
+    const key=bkOf(bi,bj);
+    if(landmarkBlocks[key]) continue; // built later as a landmark
+
+    const hotel = hotelBlocks[key];
+    // pick the best shopping street bordering this block, and which side it's on
+    const borders=[{name:vA.name,side:'x0',len:bd},{name:vB.name,side:'x1',len:bd},{name:hA.name,side:'z0',len:bw},{name:hB.name,side:'z1',len:bw}];
+    let best=null;
+    for(const b of borders){ const k=shopKindFor(b.name); if(k && (!best || shopPri[k]>shopPri[best.kind])) best={...b,kind:k}; }
+
+    // building mass (inset a touch so shopfronts sit in front)
+    const w=bw-1.2, d=bd-1.2;
+    const storeys = hotel ? 7 : best ? 5+(rnd()*2|0) : 4+(rnd()*3|0);
+    const h=storeys*3.4;
+    const p = hotel ? {c:0xeae4d6,k:'stone'}
+            : best==='highstreet'||best&&best.kind==='luxury' ? {c:0xdcd4c2,k:'stone'}
+            : facadePalette[(rnd()*facadePalette.length)|0];
+    const mesh=new THREE.Mesh(boxGeo(w,h,d), facadeMat(p.c,w,h,p.k));
+    mesh.position.set(cx,h/2+1.2,cz); mesh.castShadow=true; mesh.receiveShadow=true; buildingGroup.add(mesh);
+    // ground floor band
+    const band=new THREE.Mesh(boxGeo(w+0.3,2.4,d+0.3), new THREE.MeshStandardMaterial({color:(p.k==='brick'||p.k==='stock')?0x59504a:0x726c62, roughness:0.8}));
+    band.position.set(cx,1.2,cz); band.castShadow=true; buildingGroup.add(band);
+    // cornice + roof
+    const cor=new THREE.Mesh(boxGeo(w+0.6,0.8,d+0.6), new THREE.MeshStandardMaterial({color:0xf1ece0, roughness:0.85})); cor.position.set(cx,h+1.6,cz); cor.castShadow=true; buildingGroup.add(cor);
+    if(storeys<=5) addPitchedRoof(buildingGroup, cx, cz, w+0.6, d+0.6, h+2.0, rnd()<0.6?slate:terracotta);
+    else { const para=new THREE.Mesh(boxGeo(w+0.6,1.3,d+0.6), new THREE.MeshStandardMaterial({color:0xe9e3d6, roughness:0.9})); para.position.set(cx,h+2.2,cz); buildingGroup.add(para); }
+    colliders.push({x:cx,z:cz,hw:w/2,hd:d/2});
+
+    if(hotel){
+      // grand hotel: name fascias on both long sides + flag
+      placeShopRow(cx,z0, 'z0', bw, 'hotel'); // handled below with custom name
+      // overwrite: put the hotel name centrally on the street sides
+      const front=makeShopfront(hotel, Math.min(bw*0.6,20), 'hotel'); front.position.set(cx,0,z0-0.15); front.rotation.y=Math.PI; buildingGroup.add(front);
+      const front2=makeShopfront(hotel, Math.min(bw*0.6,20), 'hotel'); front2.position.set(cx,0,z1+0.15); buildingGroup.add(front2);
+      landmarks.push({name:hotel.replace(/’/g,"'"), x:cx, z:cz, r:38});
+    } else if(best){
+      placeShopRow(cx, best.side==='z0'?z0:best.side==='z1'?z1:cz,
+                   best.side, best.len, best.kind);
+      if(best.side==='x0') placeShopRow(x0, cz, 'x0', bd, best.kind);
+      if(best.side==='x1') placeShopRow(x1, cz, 'x1', bd, best.kind);
+    } else {
+      // residential townhouses — railings, porticoes, a tree or two
+      const rail=makeRailings(w*0.9); rail.position.set(cx,0,z0-0.6); buildingGroup.add(rail);
+      for(const off of [-w*0.28, w*0.28]){ const po=makePortico(); po.position.set(cx+off,0,z0-0.2); po.rotation.y=Math.PI; buildingGroup.add(po); }
+      buildingGroup.add(makeTree(cx-w*0.4, z0-1.4)); buildingGroup.add(makeTree(cx+w*0.4, z0-1.4));
+    }
+  }
+}
+
+// ---------- real street-name signs at the junctions ----------
+for(const v of vStreets){ for(const h of hStreets){
+  if(!(v.main||h.main)) continue; // sign the busier corners
+  const vs=makeStreetSign(v.name); vs.position.set(v.c - v.w/2 - 2, 0, h.c + h.w/2 + 2); buildingGroup.add(vs);
+  const hs=makeStreetSign(h.name); hs.position.set(v.c + v.w/2 + 2, 0, h.c - h.w/2 - 2); hs.rotation.y=Math.PI/2; buildingGroup.add(hs);
+}}
 
 setLoad(0.5, 'Placing landmarks…');
 
 // ============================================================
-//  LANDMARKS
+//  LANDMARKS  (Mayfair)  — landmarks[] already declared above
 // ============================================================
-const landmarks = []; // {name, x, z, r} for place-name notifications
-landmarks.push({ name:'Mayfair · Curzon Street', x:(g0+1)*CELL, z:curzonZ, r:64 });
-
 function addBigBen(x,z){
   const g = new THREE.Group();
   const stoneMat = new THREE.MeshStandardMaterial({ color: 0xbfa77e, roughness: 0.85 });
@@ -753,9 +753,9 @@ function makeTree(x,z){
 }
 
 // leafy Mayfair-style garden square with iron railings and a central statue
-function addSquare(x,z,name){
+function addSquare(x,z,name,sw,sd){
   const g = new THREE.Group();
-  const S = BLOCK-2;
+  const S = Math.min(sw||46, sd||46);
   const grass = new THREE.Mesh(new THREE.PlaneGeometry(S,S), new THREE.MeshStandardMaterial({color:0x4d7a38, roughness:1}));
   grass.rotation.x=-Math.PI/2; grass.position.y=0.03; grass.receiveShadow=true; g.add(grass);
   // gravel cross paths
@@ -843,17 +843,36 @@ function makeRoundel(){
   return g;
 }
 
-landmarkPlan.forEach(l=>{
-  const {x,z} = blockCenter(l.i,l.j);
-  if(l.type==='bigben') addBigBen(x,z);
-  else if(l.type==='eye') addEye(x,z);
-  else if(l.type==='stpauls') addStPauls(x,z);
-  else if(l.type==='shard') addShard(x,z);
-  else if(l.type==='gherkin') addGherkin(x,z);
-  else if(l.type==='park') addPark(x,z);
-  else if(l.type==='towerbridge') addTowerBridge(x,z);
-  else if(l.type==='square') addSquare(x,z,l.name);
-});
+// Shepherd Market — a dense little cluster of pubs, cafés and small shops
+function addShepherdMarket(x,z,bw,bd,name){
+  const n=4;
+  for(let a=0;a<n;a++) for(let b=0;b<n;b++){
+    if(rnd()<0.18) continue;
+    const sw=bw/n-1.5, sd=bd/n-1.5;
+    const bx=x-bw/2+ (bw/n)*(a+0.5), bz=z-bd/2+(bd/n)*(b+0.5);
+    const storeys=3+(rnd()*2|0), h=storeys*3.2;
+    const p=facadePalette[(rnd()*facadePalette.length)|0];
+    const m=new THREE.Mesh(boxGeo(sw,h,sd), facadeMat(p.c,sw,h,p.k)); m.position.set(bx,h/2+0.6,bz); m.castShadow=true; m.receiveShadow=true; buildingGroup.add(m);
+    addPitchedRoof(buildingGroup,bx,bz,sw+0.4,sd+0.4,h+0.6, rnd()<0.5?slate:terracotta);
+    colliders.push({x:bx,z:bz,hw:sw/2,hd:sd/2});
+  }
+  // a couple of pub fascias on the edge
+  const pub=makeShopfront('YE GRAPES', Math.min(bw*0.4,9), 'market'); pub.position.set(x, 0, z-bd/2-0.2); pub.rotation.y=Math.PI; buildingGroup.add(pub);
+  landmarks.push({name, x, z, r:34});
+}
+
+// build the reserved landmark blocks (gardens + market) at their real positions
+for(const key in landmarkBlocks){
+  const [bi,bj]=key.split(',').map(Number);
+  const vA=vStreets[bi], vB=vStreets[bi+1], hA=hStreets[bj], hB=hStreets[bj+1];
+  const x0=vA.c+vA.w/2, x1=vB.c-vB.w/2, z0=hA.c+hA.w/2, z1=hB.c-hB.w/2;
+  const cx=(x0+x1)/2, cz=(z0+z1)/2, bw=x1-x0, bd=z1-z0;
+  const L=landmarkBlocks[key];
+  if(L.type==='square') addSquare(cx,cz,L.name,bw,bd);
+  else if(L.type==='market') addShepherdMarket(cx,cz,bw,bd,L.name);
+}
+// district name that greets you at the centre
+landmarks.push({ name:'Mayfair · W1', x:midX, z:midZ, r:80 });
 
 setLoad(0.65, 'Adding street furniture…');
 
@@ -883,29 +902,28 @@ function makePostBox(){
 }
 
 const furnitureGroup = new THREE.Group(); scene.add(furnitureGroup);
-// place lamp posts along every road at intervals, on the pavement edge
-for (const c of roadLines){
-  for (let d=-HALF; d<=HALF; d+=22){
-    // lamps along horizontal roads (z=c)
-    let l = makeLampPost(); l.position.set(d, 0, c - ROAD/2 - 1.2); furnitureGroup.add(l);
-    let l2 = makeLampPost(); l2.position.set(d, 0, c + ROAD/2 + 1.2); l2.rotation.y=Math.PI; furnitureGroup.add(l2);
-    // lamps along vertical roads (x=c)
-    let l3 = makeLampPost(); l3.position.set(c - ROAD/2 - 1.2, 0, d); l3.rotation.y=-Math.PI/2; furnitureGroup.add(l3);
-    let l4 = makeLampPost(); l4.position.set(c + ROAD/2 + 1.2, 0, d); l4.rotation.y=Math.PI/2; furnitureGroup.add(l4);
+// lamp posts along each street's pavement edge
+for (const s of hStreets){
+  for (let d=worldBounds.x0; d<=worldBounds.x1; d+=24){
+    let l=makeLampPost(); l.position.set(d,0,s.c - s.w/2 - 1.2); furnitureGroup.add(l);
+    let l2=makeLampPost(); l2.position.set(d,0,s.c + s.w/2 + 1.2); l2.rotation.y=Math.PI; furnitureGroup.add(l2);
   }
 }
-// phone/post boxes, tube roundels, flags & pavement trees at intersections
-for (const x of roadLines){
-  for (const z of roadLines){
-    const px = x+ROAD/2+2, pz = z+ROAD/2+2;
-    const r = rnd();
-    if (r<0.10){ const p=makePhoneBox(); p.position.set(px,0,pz); furnitureGroup.add(p);}
-    else if (r<0.17){ const p=makePostBox(); p.position.set(px,0,pz); furnitureGroup.add(p);}
-    else if (r<0.24){ const p=makeRoundel(); p.position.set(px,0,pz); p.rotation.y=rnd()*6; furnitureGroup.add(p);}
-    else if (r<0.30){ const p=makeUnionFlag(); p.position.set(px,0,pz); p.rotation.y=rnd()*6; furnitureGroup.add(p);}
-    else if (r<0.42){ const t=makeTree(px+0.5, pz+0.5); furnitureGroup.add(t);}
+for (const s of vStreets){
+  for (let d=worldBounds.z0; d<=worldBounds.z1; d+=24){
+    let l3=makeLampPost(); l3.position.set(s.c - s.w/2 - 1.2,0,d); l3.rotation.y=-Math.PI/2; furnitureGroup.add(l3);
+    let l4=makeLampPost(); l4.position.set(s.c + s.w/2 + 1.2,0,d); l4.rotation.y=Math.PI/2; furnitureGroup.add(l4);
   }
 }
+// phone/post boxes, tube roundels & flags at the junctions
+for (const v of vStreets){ for (const h of hStreets){
+  const px = v.c + v.w/2 + 2, pz = h.c + h.w/2 + 2;
+  const r = rnd();
+  if (r<0.12){ const p=makePhoneBox(); p.position.set(px,0,pz); furnitureGroup.add(p);}
+  else if (r<0.20){ const p=makePostBox(); p.position.set(px,0,pz); furnitureGroup.add(p);}
+  else if (r<0.30){ const p=makeRoundel(); p.position.set(px,0,pz); p.rotation.y=rnd()*6; furnitureGroup.add(p);}
+  else if (r<0.38){ const p=makeUnionFlag(); p.position.set(px,0,pz); p.rotation.y=rnd()*6; furnitureGroup.add(p);}
+}}
 
 setLoad(0.78, 'Building your cab…');
 
@@ -989,7 +1007,9 @@ function makeCar(bodyColor=0x0b0b0d, taxi=false, detailed=false){
 
 // Player drives a bright pillar-box-red London cab so it never blends with tarmac
 const { car: player, wheels: playerWheels, paint: playerPaint } = makeCar(0xe23b2e, true, true);
-player.position.set(CELL*0.5 + ROAD/4, 0, HALF - CELL*1.5); // start in a lane, facing into the city
+const curzonC = (hStreets.find(s=>s.name==='CURZON STREET')||hStreets[0]).c;
+const START = { x: midX, z: curzonC + 4, ry: -Math.PI/2 };   // on Curzon Street, heading east
+player.position.set(START.x, 0, START.z); player.rotation.y = START.ry;
 { // optional ?at=x,z[,ry] spawn override (handy for jumping straight to a spot)
   const at=(location.search.match(/[?&]at=([-\d.]+),([-\d.]+)(?:,([-\d.]+))?/));
   if(at){ player.position.set(+at[1],0,+at[2]); if(at[3]!==undefined) player.rotation.y=+at[3]; }
@@ -1021,30 +1041,28 @@ function makeBus(){
 const carColors=[0xffffff,0x1a1a1a,0x8a1220,0x14315e,0x8f9296,0x2f6d3a,0xd9b23a];
 function makeTrafficCar(){ const {car}=makeCar(carColors[(Math.random()*carColors.length)|0], false); return car; }
 
-// spawn agents that travel along road lines
+// assign an agent a random street + lane
+function assignStreet(a){
+  a.horizontal = Math.random()<0.5;                 // horizontal → drives along X on an hStreet
+  const s = a.horizontal ? hStreets[(Math.random()*hStreets.length)|0] : vStreets[(Math.random()*vStreets.length)|0];
+  a.line = s.c; a.w = s.w;
+  a.dir = Math.random()<0.5?1:-1;
+  a.laneOff = (a.dir>0 ? 1 : -1) * Math.max(3, a.w/4);
+}
 function spawnAgent(isBus){
   const mesh = isBus ? makeBus() : makeTrafficCar();
   scene.add(mesh);
-  // pick a road line, direction
-  const horizontal = Math.random()<0.5;
-  const line = roadLines[(Math.random()*roadLines.length)|0];
-  const dir = Math.random()<0.5?1:-1;
-  const laneOff = dir>0 ? ROAD/4 : -ROAD/4;
-  const a = {
-    mesh, isBus, horizontal, dir,
-    line, laneOff,
-    pos: (Math.random()*GRID*CELL - HALF),
-    speed: isBus ? 8+Math.random()*3 : 12+Math.random()*10,
-  };
+  const a = { mesh, isBus, speed: isBus ? 8+Math.random()*3 : 12+Math.random()*10, hit:0 };
+  assignStreet(a);
+  const lo = a.horizontal ? worldBounds.x0 : worldBounds.z0, hi = a.horizontal ? worldBounds.x1 : worldBounds.z1;
+  a.pos = lo + Math.random()*(hi-lo);
   traffic.push(a);
   updateAgent(a, 0, true);
 }
 function respawnAgent(a){
-  a.horizontal = Math.random()<0.5;
-  a.line = roadLines[(Math.random()*roadLines.length)|0];
-  a.dir = Math.random()<0.5?1:-1;
-  a.laneOff = a.dir>0 ? ROAD/4 : -ROAD/4;
-  a.pos = a.dir>0 ? -HALF-15 : HALF+15;
+  assignStreet(a);
+  const lo = a.horizontal ? worldBounds.x0 : worldBounds.z0, hi = a.horizontal ? worldBounds.x1 : worldBounds.z1;
+  a.pos = a.dir>0 ? lo-15 : hi+15;
   a.hit = 0;
 }
 function updateAgent(a, dt, init){
@@ -1059,8 +1077,9 @@ function updateAgent(a, dt, init){
     return;
   }
   a.pos += a.dir * a.speed * dt;
-  if (a.pos > HALF+20) a.pos = -HALF-20;
-  if (a.pos < -HALF-20) a.pos = HALF+20;
+  const lo = a.horizontal ? worldBounds.x0 : worldBounds.z0, hi = a.horizontal ? worldBounds.x1 : worldBounds.z1;
+  if (a.pos > hi+20) a.pos = lo-20;
+  if (a.pos < lo-20) a.pos = hi+20;
   // vehicle front is local -Z, so headings are offset accordingly
   if (a.horizontal){
     a.mesh.position.set(a.pos, 0, a.line + a.laneOff);
@@ -1107,11 +1126,12 @@ function makePed(){
   scene.add(g);
   return g;
 }
-for(let k=0;k<40;k++){
-  const line=roadLines[(Math.random()*roadLines.length)|0];
+for(let k=0;k<44;k++){
   const horizontal=Math.random()<0.5;
-  const side=(Math.random()<0.5?1:-1)*(ROAD/2+2);
-  const p={ mesh:makePed(), horizontal, line, side, pos:(Math.random()*GRID*CELL-HALF), dir:Math.random()<0.5?1:-1, speed:1+Math.random()*0.8, phase:Math.random()*6 };
+  const s = horizontal ? hStreets[(Math.random()*hStreets.length)|0] : vStreets[(Math.random()*vStreets.length)|0];
+  const side=(Math.random()<0.5?1:-1)*(s.w/2+2);
+  const lo = horizontal ? worldBounds.x0 : worldBounds.z0, hi = horizontal ? worldBounds.x1 : worldBounds.z1;
+  const p={ mesh:makePed(), horizontal, line:s.c, side, pos:lo+Math.random()*(hi-lo), dir:Math.random()<0.5?1:-1, speed:1+Math.random()*0.8, phase:Math.random()*6 };
   peds.push(p);
 }
 
@@ -1209,8 +1229,7 @@ const vehicle = {
   reverseMax: -14,
   friction: 8,
 };
-player.rotation.y = 0; // local -Z is forward → faces into the city
-vehicle.heading = player.rotation.y;
+vehicle.heading = player.rotation.y; // keep the START heading set above
 
 // ----- damage / impact state -----
 let damage = 0;      // 0 (mint) .. 100 (wreck)
@@ -1224,9 +1243,9 @@ function addDamage(amount, impact){
   updateWreck();
 }
 function resetCar(){
-  player.position.set(CELL*0.5 + ROAD/4, 0, HALF - CELL*1.5);
-  player.rotation.set(0, 0, 0);
-  vehicle.speed = 0; vehicle.heading = 0;
+  player.position.set(START.x, 0, START.z);
+  player.rotation.set(0, START.ry, 0);
+  vehicle.speed = 0; vehicle.heading = START.ry;
   damage = 0; shake = 0; jolt = 0; updateWreck();
   showPlace('Repaired');
 }
@@ -1251,9 +1270,8 @@ function resolveCollision(px, pz){
       vehicle.speed *= 0.35;
     }
   }
-  const B = HALF + CELL;
-  px = Math.max(-B, Math.min(B, px));
-  pz = Math.max(-B, Math.min(B, pz));
+  px = Math.max(worldBounds.x0-10, Math.min(worldBounds.x1+10, px));
+  pz = Math.max(worldBounds.z0-10, Math.min(worldBounds.z1+10, pz));
   return [px,pz];
 }
 
@@ -1308,16 +1326,20 @@ function drawMinimap(){
   mmx.clearRect(0,0,W,H);
   mmx.fillStyle='#20242c'; mmx.fillRect(0,0,W,H);
   // zoom in a little when collapsed so it stays readable
-  const scale = W / ((big ? GRID+2 : GRID*0.55) * CELL);
+  const worldW = Math.max(maxX-minX, maxZ-minZ) + 120;
+  const scale = W / (big ? worldW : worldW*0.5);
   const cx=W/2, cy=H/2;
   const toMap=(x,z)=>[cx + (x-player.position.x)*scale, cy + (z-player.position.z)*scale];
-  // roads — main avenues drawn brighter/thicker than side streets
-  for(const c of roadLines){
-    const main = isMain(c);
-    mmx.strokeStyle = main ? '#525c6b' : '#394050';
-    mmx.lineWidth = Math.max(1.5, (main?ROAD*1.15:ROAD*0.75)*scale);
-    let [ax,ay]=toMap(-HALF,c),[bx,by]=toMap(HALF,c); mmx.beginPath();mmx.moveTo(ax,ay);mmx.lineTo(bx,by);mmx.stroke();
-    let [cx1,cy1]=toMap(c,-HALF),[dx,dy]=toMap(c,HALF); mmx.beginPath();mmx.moveTo(cx1,cy1);mmx.lineTo(dx,dy);mmx.stroke();
+  // real streets — main avenues brighter/thicker than side streets
+  for(const s of hStreets){
+    mmx.strokeStyle = s.main ? '#525c6b' : '#394050';
+    mmx.lineWidth = Math.max(1.5, s.w*scale);
+    let [ax,ay]=toMap(worldBounds.x0,s.c),[bx,by]=toMap(worldBounds.x1,s.c); mmx.beginPath();mmx.moveTo(ax,ay);mmx.lineTo(bx,by);mmx.stroke();
+  }
+  for(const s of vStreets){
+    mmx.strokeStyle = s.main ? '#525c6b' : '#394050';
+    mmx.lineWidth = Math.max(1.5, s.w*scale);
+    let [ax,ay]=toMap(s.c,worldBounds.z0),[bx,by]=toMap(s.c,worldBounds.z1); mmx.beginPath();mmx.moveTo(ax,ay);mmx.lineTo(bx,by);mmx.stroke();
   }
   // landmarks
   landmarks.forEach(l=>{ const [x,y]=toMap(l.x,l.z); mmx.fillStyle='#ffd166'; mmx.beginPath();mmx.arc(x,y,4,0,7);mmx.fill(); });
@@ -1404,7 +1426,8 @@ function update(dt){
   for(const a of traffic) updateAgent(a, dt);
   for(const p of peds){
     p.pos += p.dir*p.speed*dt;
-    if(p.pos>HALF){p.pos=-HALF;} if(p.pos<-HALF){p.pos=HALF;}
+    const plo = p.horizontal ? worldBounds.x0 : worldBounds.z0, phi = p.horizontal ? worldBounds.x1 : worldBounds.z1;
+    if(p.pos>phi){p.pos=plo;} if(p.pos<plo){p.pos=phi;}
     p.phase+=dt*6;
     const bob=Math.abs(Math.sin(p.phase))*0.08;
     if(p.horizontal){ p.mesh.position.set(p.pos,bob,p.line+p.side); p.mesh.rotation.y=p.dir>0?Math.PI/2:-Math.PI/2;}
