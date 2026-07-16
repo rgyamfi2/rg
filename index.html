@@ -13,6 +13,13 @@
   /* cinematic vignette over the 3D view, under the HUD */
   #vignette { position: fixed; inset: 0; pointer-events: none; z-index: 2;
     background: radial-gradient(ellipse 82% 78% at 50% 44%, rgba(0,0,0,0) 66%, rgba(8,10,16,0.30) 100%); }
+  /* rear-view mirror frame (the view itself is WebGL-rendered into this box) */
+  #mirror { position: fixed; top: 12px; left: 50%; transform: translateX(-50%);
+    width: 40vw; max-width: 430px; height: 11.2vw; max-height: 120px; z-index: 3; pointer-events: none;
+    border: 3px solid rgba(20,24,30,.85); border-radius: 12px; box-shadow: 0 6px 16px rgba(0,0,0,.45), inset 0 0 0 1px rgba(255,255,255,.25); }
+  #mirror::after { content: attr(data-label); position: absolute; top: -15px; left: 50%; transform: translateX(-50%);
+    font-size: 9px; letter-spacing: 2px; color: #fff; opacity: .45; white-space: nowrap; }
+  #mirror.off { display: none; }
 
   /* HUD */
   #hud { position: fixed; inset: 0; pointer-events: none; color: #fff; }
@@ -25,6 +32,11 @@
   #speedo .val { font-size: 46px; font-weight: 800; line-height: 1; letter-spacing: -1px; }
   #speedo .unit { font-size: 13px; opacity: .7; letter-spacing: 2px; }
   #speedo .gear { position:absolute; left:16px; bottom:14px; font-size:13px; opacity:.65; letter-spacing:1px;}
+
+  /* Taxi shift panel (top-left) */
+  #taxi { left: 20px; top: 20px; padding: 10px 16px; min-width: 150px; }
+  #taxi .fare { font-size: 22px; font-weight: 800; letter-spacing: -.5px; color:#ffd166; }
+  #taxi .job { font-size: 12px; opacity: .82; margin-top: 3px; line-height:1.35; max-width: 220px; }
 
   /* Damage / bodywork meter (bottom-right, above the speedo) */
   #dmgwrap { right: 20px; bottom: 128px; width: 168px; padding: 9px 14px; }
@@ -72,15 +84,23 @@
     border: 1.5px solid rgba(255,255,255,.30); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
     font-size: 40px; box-shadow: 0 6px 18px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.18); }
 
-  /* Pedals, bottom-right */
-  #pedals { position: absolute; right: 20px; bottom: 26px; display: flex; gap: 12px; align-items: flex-end; }
-  .tbtn.pedal { width: 82px; height: 150px; border-radius: 22px; flex-direction: column; gap: 6px;
-    border: 1.5px solid rgba(255,255,255,.28); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
-    box-shadow: 0 8px 22px rgba(0,0,0,.4), inset 0 2px 0 rgba(255,255,255,.22); }
-  .tbtn.pedal .ico { font-size: 34px; line-height: 1; }
-  .tbtn.pedal .lbl { font-size: 12px; letter-spacing: 2px; opacity: .92; }
-  #t-gas   { background: linear-gradient(180deg, #2ec36b, #14964a); }
-  #t-brake { background: linear-gradient(180deg, #ff5a52, #d5271e); height: 118px; }
+  /* Pedals, bottom-right — styled like real car pedals (ridged rubber pad on a metal arm) */
+  #pedals { position: absolute; right: 22px; bottom: 26px; display: flex; gap: 16px; align-items: flex-end; }
+  .tbtn.pedal { width: 74px; flex-direction: column; justify-content: flex-end; gap: 0;
+    background: none; border: none; box-shadow: none; filter: drop-shadow(0 8px 14px rgba(0,0,0,.5)); }
+  .tbtn.pedal .arm { width: 12px; height: 26px; border-radius: 4px;
+    background: linear-gradient(180deg,#c9ced6,#7d828b); box-shadow: inset 0 1px 0 rgba(255,255,255,.6); }
+  .tbtn.pedal .pad { width: 74px; height: 118px; border-radius: 14px 14px 16px 16px;
+    border: 2px solid rgba(0,0,0,.35); position: relative; overflow: hidden;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+    background-image: repeating-linear-gradient(0deg, rgba(0,0,0,.35) 0 3px, rgba(255,255,255,.06) 3px 9px); }
+  .tbtn.pedal .pad::after { content:''; position:absolute; inset:0; border-radius:12px;
+    background: linear-gradient(180deg, rgba(255,255,255,.22), rgba(255,255,255,0) 40%); pointer-events:none; }
+  .tbtn.pedal .ico { font-size: 26px; line-height: 1; z-index:1; }
+  .tbtn.pedal .lbl { font-size: 11px; letter-spacing: 2px; z-index:1; }
+  .tbtn.pedal:active .pad { transform: translateY(3px); }
+  #t-gas   .pad { background-color: #1c7d3f; box-shadow: inset 0 0 0 2px rgba(120,255,170,.25); }
+  #t-brake .pad { background-color: #a5231c; height: 96px; box-shadow: inset 0 0 0 2px rgba(255,150,140,.25); }
 
   @media (hover: none) and (pointer: coarse) { #touch { display: block; } #help { display: none; } }
   /* let people force-show controls with ?touch=1 for testing */
@@ -90,8 +110,10 @@
 <body>
 <div id="app"></div>
 <div id="vignette"></div>
+<div id="mirror" data-label="REAR VIEW"></div>
 
 <div id="hud">
+  <div id="taxi" class="panel"><div class="fare">£<span id="cash">0</span></div><div class="job" id="jobtxt">Starting shift…</div></div>
   <div id="minimap" class="panel"><canvas id="mm" width="360" height="360"></canvas><div class="mm-tag" id="mmTag">tap to expand</div></div>
   <div id="place" class="panel"></div>
   <div id="speedo" class="panel">
@@ -113,8 +135,8 @@
     <div class="tbtn steer" id="t-right">›</div>
   </div>
   <div id="pedals">
-    <div class="tbtn pedal" id="t-brake"><span class="ico">▾</span><span class="lbl">BRAKE</span></div>
-    <div class="tbtn pedal" id="t-gas"><span class="ico">▴</span><span class="lbl">GO</span></div>
+    <div class="tbtn pedal" id="t-brake"><span class="arm"></span><span class="pad"><span class="ico">◖◗</span><span class="lbl">BRAKE</span></span></div>
+    <div class="tbtn pedal" id="t-gas"><span class="arm"></span><span class="pad"><span class="ico">▲</span><span class="lbl">GAS</span></span></div>
   </div>
 </div>
 
@@ -229,24 +251,27 @@ setLoad(0.1, 'Laying the streets…');
 const roadY = 0.02;
 // vertical streets (run N–S): x centre, carriageway width, name
 const vStreets = [
-  {c:-250, w:26, name:'PARK LANE', main:true},
-  {c:-192, w:13, name:'PARK STREET'},
-  {c:-148, w:15, name:'SOUTH AUDLEY ST', main:true},
-  {c:-92,  w:14, name:'DAVIES STREET'},
-  {c:-34,  w:15, name:'BERKELEY STREET', main:true},
-  {c:46,   w:16, name:'NEW BOND STREET', main:true},
-  {c:116,  w:13, name:'ALBEMARLE ST'},
-  {c:200,  w:26, name:'REGENT STREET', main:true},
+  {c:-300, w:26, name:'PARK LANE', main:true},
+  {c:-250, w:13, name:'PARK STREET'},
+  {c:-205, w:15, name:'SOUTH AUDLEY ST', main:true},
+  {c:-160, w:13, name:'DUKE STREET'},
+  {c:-112, w:14, name:'DAVIES STREET', main:true},
+  {c:-52,  w:15, name:'BERKELEY STREET', main:true},
+  {c:6,    w:13, name:'OLD BOND STREET'},
+  {c:52,   w:16, name:'NEW BOND STREET', main:true},
+  {c:120,  w:13, name:'DOVER STREET'},
+  {c:196,  w:26, name:'REGENT STREET', main:true},
 ];
 // horizontal streets (run E–W): z centre, width, name
 const hStreets = [
-  {c:-232, w:26, name:'OXFORD STREET', main:true},
-  {c:-178, w:14, name:'GROSVENOR ST'},
-  {c:-138, w:14, name:'BROOK STREET', main:true},
-  {c:-78,  w:15, name:'MOUNT STREET', main:true},
-  {c:-22,  w:13, name:'HILL STREET'},
-  {c:36,   w:16, name:'CURZON STREET', main:true},
-  {c:122,  w:26, name:'PICCADILLY', main:true},
+  {c:-250, w:26, name:'OXFORD STREET', main:true},
+  {c:-196, w:14, name:'GROSVENOR ST'},
+  {c:-150, w:14, name:'BROOK STREET', main:true},
+  {c:-92,  w:15, name:'MOUNT STREET', main:true},
+  {c:-40,  w:13, name:'HILL STREET'},
+  {c:12,   w:13, name:'CHARLES STREET'},
+  {c:64,   w:16, name:'CURZON STREET', main:true},
+  {c:140,  w:26, name:'PICCADILLY', main:true},
 ];
 const vLines = vStreets.map(s=>s.c), hLines = hStreets.map(s=>s.c);
 const vByC = {}, hByC = {}; vStreets.forEach(s=>vByC[s.c]=s); hStreets.forEach(s=>hByC[s.c]=s);
@@ -254,6 +279,12 @@ const minX=vLines[0], maxX=vLines[vLines.length-1], minZ=hLines[0], maxZ=hLines[
 const midX=(minX+maxX)/2, midZ=(minZ+maxZ)/2;
 const HALF = Math.max(maxX-minX, maxZ-minZ)/2 + 60;   // for ground / bounds / minimap
 const worldBounds = { x0:minX-30, x1:maxX+30, z0:minZ-30, z1:maxZ+30 };
+// is a world point on any carriageway? (keeps furniture off the road)
+function onRoad(x,z){
+  for(const s of vStreets) if(Math.abs(x-s.c) < s.w/2+1.2) return true;
+  for(const s of hStreets) if(Math.abs(z-s.c) < s.w/2+1.2) return true;
+  return false;
+}
 
 // A small deterministic PRNG so the city is stable each load
 let seed = 20240607;
@@ -323,20 +354,33 @@ function belisha(x, z){
   globe.position.y=4.5; g.add(globe);
   g.position.set(x,0,z); roadGroup.add(g);
 }
-function addZebra(cx, cz, wv, wh){
-  const stripeGeo = new THREE.PlaneGeometry(1.1, Math.min(wv,wh)-2);
-  for (let s=-3; s<=3; s++){
-    addFlat(stripeGeo, lineMat, cx + s*1.9, cz - wh/2 - 3.2, 0);
-    addFlat(stripeGeo, lineMat, cx + s*1.9, cz + wh/2 + 3.2, 0);
-    addFlat(stripeGeo, lineMat, cx - wv/2 - 3.2, cz + s*1.9, Math.PI/2);
-    addFlat(stripeGeo, lineMat, cx + wv/2 + 3.2, cz + s*1.9, Math.PI/2);
+// one clean zebra crossing across a single street mid-block (no overlaps)
+function addCrossing(cx, cz, vertical, roadW){
+  const n=6, len=roadW-1.4;
+  for(let i=0;i<n;i++){
+    const off=-((n-1)/2)*2 + i*2;
+    const m = vertical ? addFlat(new THREE.PlaneGeometry(len,1.0), lineMat, cx, cz+off, 0)
+                       : addFlat(new THREE.PlaneGeometry(1.0,len), lineMat, cx+off, cz, 0);
+    m.position.y = roadY+0.03; // above the lane markings
   }
-  belisha(cx - wv/2 - 2, cz - wh/2 - 2);
-  belisha(cx + wv/2 + 2, cz + wh/2 + 2);
+  if(vertical){ belisha(cx-roadW/2-1.6, cz-6); belisha(cx+roadW/2+1.6, cz+6); }
+  else { belisha(cx-6, cz-roadW/2-1.6); belisha(cx+6, cz+roadW/2+1.6); }
 }
-for(const v of vStreets) for(const h of hStreets){
-  if(v.main && h.main && rnd()<0.55) addZebra(v.c, h.c, v.w, h.w);
-}
+const getV=n=>vStreets.find(s=>s.name===n), getH=n=>hStreets.find(s=>s.name===n);
+const mid=(a,b)=>(a+b)/2;
+// curated real crossing points, each safely mid-block
+[
+  ['CURZON STREET', mid(getV('BERKELEY STREET').c, getV('OLD BOND STREET').c), false],
+  ['MOUNT STREET',  mid(getV('DAVIES STREET').c,   getV('BERKELEY STREET').c), false],
+  ['PICCADILLY',    mid(getV('BERKELEY STREET').c, getV('OLD BOND STREET').c), false],
+  ['NEW BOND STREET', mid(getH('BROOK STREET').c,  getH('MOUNT STREET').c),    true],
+  ['NEW BOND STREET', mid(getH('CURZON STREET').c, getH('PICCADILLY').c),      true],
+  ['DAVIES STREET', mid(getH('MOUNT STREET').c,    getH('HILL STREET').c),     true],
+].forEach(([name,coord,vertical])=>{
+  const s = vertical ? getV(name) : getH(name);
+  if(!s) return;
+  if(vertical) addCrossing(s.c, coord, true, s.w); else addCrossing(coord, s.c, false, s.w);
+});
 
 setLoad(0.22, 'Painting the roads…');
 
@@ -544,19 +588,19 @@ const shopPri = { luxury:5, dining:4, piccadilly:3, curzon:2, highstreet:1 };
 let shopSeed=0;
 function pickShop(kind){ const pool=shopPools[kind]||shopPools.luxury; return pool[(shopSeed++)%pool.length]; }
 
-// blocks reserved for hand-built landmarks (by block index "bi,bj")
-const bkOf=(bi,bj)=>bi+','+bj;
-const landmarkBlocks = {
-  // gardens
-  '3,3': {type:'square', name:'Berkeley Square'},
-  '2,1': {type:'square', name:'Grosvenor Square'},
-  '4,5': {type:'market', name:'Shepherd Market'},
-};
-const hotelBlocks = {
-  '3,2': 'CLARIDGE’S',
-  '2,3': 'THE CONNAUGHT',
-  '0,3': 'THE DORCHESTER',
-};
+// landmarks keyed by the block's SW corner streets (west vertical, north horizontal)
+const landmarkDefs = [
+  {v:'DAVIES STREET',    h:'MOUNT STREET',   type:'square', name:'Berkeley Square'},
+  {v:'SOUTH AUDLEY ST',  h:'GROSVENOR ST',   type:'square', name:'Grosvenor Square'},
+  {v:'BERKELEY STREET',  h:'CURZON STREET',  type:'market', name:'Shepherd Market'},
+];
+const hotelDefs = [
+  {v:'DAVIES STREET',   h:'BROOK STREET', name:'CLARIDGE’S'},
+  {v:'DUKE STREET',     h:'MOUNT STREET', name:'THE CONNAUGHT'},
+  {v:'PARK LANE',       h:'MOUNT STREET', name:'THE DORCHESTER'},
+];
+const landmarkAt = (vA,hA)=> landmarkDefs.find(d=>d.v===vA.name && d.h===hA.name);
+const hotelAt    = (vA,hA)=> hotelDefs.find(d=>d.v===vA.name && d.h===hA.name);
 
 function placeShopRow(cx, cz, side, faceLen, kind){
   const n = Math.max(1, Math.min(6, Math.floor(faceLen/12)));
@@ -578,10 +622,9 @@ for(let bi=0; bi<vStreets.length-1; bi++){
     const x0=vA.c+vA.w/2, x1=vB.c-vB.w/2, z0=hA.c+hA.w/2, z1=hB.c-hB.w/2;
     const bw=x1-x0, bd=z1-z0; if(bw<8||bd<8) continue;
     const cx=(x0+x1)/2, cz=(z0+z1)/2;
-    const key=bkOf(bi,bj);
-    if(landmarkBlocks[key]) continue; // built later as a landmark
+    if(landmarkAt(vA,hA)) continue; // built later as a landmark
 
-    const hotel = hotelBlocks[key];
+    const hotelDef = hotelAt(vA,hA); const hotel = hotelDef && hotelDef.name;
     // pick the best shopping street bordering this block, and which side it's on
     const borders=[{name:vA.name,side:'x0',len:bd},{name:vB.name,side:'x1',len:bd},{name:hA.name,side:'z0',len:bw},{name:hB.name,side:'z1',len:bw}];
     let best=null;
@@ -864,15 +907,14 @@ function addShepherdMarket(x,z,bw,bd,name){
 }
 
 // build the reserved landmark blocks (gardens + market) at their real positions
-for(const key in landmarkBlocks){
-  const [bi,bj]=key.split(',').map(Number);
-  const vA=vStreets[bi], vB=vStreets[bi+1], hA=hStreets[bj], hB=hStreets[bj+1];
+for(let bi=0; bi<vStreets.length-1; bi++){ for(let bj=0; bj<hStreets.length-1; bj++){
+  const vA=vStreets[bi], hA=hStreets[bj]; const L=landmarkAt(vA,hA); if(!L) continue;
+  const vB=vStreets[bi+1], hB=hStreets[bj+1];
   const x0=vA.c+vA.w/2, x1=vB.c-vB.w/2, z0=hA.c+hA.w/2, z1=hB.c-hB.w/2;
   const cx=(x0+x1)/2, cz=(z0+z1)/2, bw=x1-x0, bd=z1-z0;
-  const L=landmarkBlocks[key];
   if(L.type==='square') addSquare(cx,cz,L.name,bw,bd);
   else if(L.type==='market') addShepherdMarket(cx,cz,bw,bd,L.name);
-}
+}}
 // district name that greets you at the centre
 landmarks.push({ name:'Mayfair · W1', x:midX, z:midZ, r:80 });
 
@@ -902,30 +944,78 @@ function makePostBox(){
   const top = new THREE.Mesh(new THREE.SphereGeometry(0.7,16,8,0,Math.PI*2,0,Math.PI/2), red); top.position.y=2.6; g.add(top);
   return g;
 }
+// UK traffic signal — one aspect lit
+function makeTrafficLight(state){
+  const g=new THREE.Group();
+  const pole=new THREE.Mesh(new THREE.CylinderGeometry(0.12,0.16,5.2,10), new THREE.MeshStandardMaterial({color:0x23262b, metalness:0.5, roughness:0.5}));
+  pole.position.y=2.6; pole.castShadow=true; g.add(pole);
+  const housing=new THREE.Mesh(new THREE.BoxGeometry(0.7,2.0,0.5), new THREE.MeshStandardMaterial({color:0x181a1d, roughness:0.6}));
+  housing.position.set(0,5.4,0.25); g.add(housing);
+  const cols=[['#ff2a1a',0.65],['#ffb400',0],['#25d24a',-0.65]];
+  cols.forEach(([hex,dy],i)=>{
+    const on = (state==='red'&&i===0)||(state==='green'&&i===2);
+    const m=new THREE.Mesh(new THREE.CircleGeometry(0.2,16), new THREE.MeshStandardMaterial({color:hex, emissive:hex, emissiveIntensity:on?1.4:0.05}));
+    m.position.set(0,5.4+dy,0.51); g.add(m);
+  });
+  return g;
+}
+// yellow Gatso-style speed camera on a pole
+function makeSpeedCamera(){
+  const g=new THREE.Group();
+  const pole=new THREE.Mesh(new THREE.CylinderGeometry(0.12,0.16,4.4,10), new THREE.MeshStandardMaterial({color:0x2a2c30, metalness:0.4, roughness:0.6}));
+  pole.position.y=2.2; pole.castShadow=true; g.add(pole);
+  const yellow=new THREE.MeshStandardMaterial({color:0xf4c400, roughness:0.5});
+  const box=new THREE.Mesh(new THREE.BoxGeometry(1.1,1.0,1.6), yellow); box.position.set(0,4.6,0); box.castShadow=true; g.add(box);
+  const lens=new THREE.Mesh(new THREE.CylinderGeometry(0.3,0.3,0.3,16), new THREE.MeshStandardMaterial({color:0x101418, roughness:0.2, metalness:0.6})); lens.rotation.x=Math.PI/2; lens.position.set(0,4.6,0.9); g.add(lens);
+  const strip=new THREE.Mesh(new THREE.BoxGeometry(1.12,0.25,0.05), new THREE.MeshStandardMaterial({color:0x111, roughness:0.6})); strip.position.set(0,4.9,0.81); g.add(strip);
+  return g;
+}
 
 const furnitureGroup = new THREE.Group(); scene.add(furnitureGroup);
-// lamp posts along each street's pavement edge
+// lamp posts along each street's pavement edge — skip any that fall in a
+// crossing carriageway (that was the "lamp in the middle of the road" bug)
 for (const s of hStreets){
   for (let d=worldBounds.x0; d<=worldBounds.x1; d+=24){
-    let l=makeLampPost(); l.position.set(d,0,s.c - s.w/2 - 1.2); furnitureGroup.add(l);
-    let l2=makeLampPost(); l2.position.set(d,0,s.c + s.w/2 + 1.2); l2.rotation.y=Math.PI; furnitureGroup.add(l2);
+    const zz1=s.c - s.w/2 - 1.4, zz2=s.c + s.w/2 + 1.4;
+    if(!onRoad(d,zz1)){ let l=makeLampPost(); l.position.set(d,0,zz1); furnitureGroup.add(l); }
+    if(!onRoad(d,zz2)){ let l2=makeLampPost(); l2.position.set(d,0,zz2); l2.rotation.y=Math.PI; furnitureGroup.add(l2); }
   }
 }
 for (const s of vStreets){
   for (let d=worldBounds.z0; d<=worldBounds.z1; d+=24){
-    let l3=makeLampPost(); l3.position.set(s.c - s.w/2 - 1.2,0,d); l3.rotation.y=-Math.PI/2; furnitureGroup.add(l3);
-    let l4=makeLampPost(); l4.position.set(s.c + s.w/2 + 1.2,0,d); l4.rotation.y=Math.PI/2; furnitureGroup.add(l4);
+    const xx1=s.c - s.w/2 - 1.4, xx2=s.c + s.w/2 + 1.4;
+    if(!onRoad(xx1,d)){ let l3=makeLampPost(); l3.position.set(xx1,0,d); l3.rotation.y=-Math.PI/2; furnitureGroup.add(l3); }
+    if(!onRoad(xx2,d)){ let l4=makeLampPost(); l4.position.set(xx2,0,d); l4.rotation.y=Math.PI/2; furnitureGroup.add(l4); }
   }
 }
-// phone/post boxes, tube roundels & flags at the junctions
+// phone/post boxes, tube roundels & flags at the junctions (on the pavement corner)
 for (const v of vStreets){ for (const h of hStreets){
-  const px = v.c + v.w/2 + 2, pz = h.c + h.w/2 + 2;
+  const px = v.c + v.w/2 + 2.5, pz = h.c + h.w/2 + 2.5;
+  if(onRoad(px,pz)) continue;
   const r = rnd();
   if (r<0.12){ const p=makePhoneBox(); p.position.set(px,0,pz); furnitureGroup.add(p);}
   else if (r<0.20){ const p=makePostBox(); p.position.set(px,0,pz); furnitureGroup.add(p);}
   else if (r<0.30){ const p=makeRoundel(); p.position.set(px,0,pz); p.rotation.y=rnd()*6; furnitureGroup.add(p);}
   else if (r<0.38){ const p=makeUnionFlag(); p.position.set(px,0,pz); p.rotation.y=rnd()*6; furnitureGroup.add(p);}
 }}
+// traffic lights on two opposite corners of each busy junction
+for(const v of vStreets){ for(const h of hStreets){
+  if(!(v.main && h.main)) continue;
+  const state = rnd()<0.5 ? 'green' : 'red';
+  const c1x=v.c - v.w/2 - 2, c1z=h.c - h.w/2 - 2;
+  const c2x=v.c + v.w/2 + 2, c2z=h.c + h.w/2 + 2;
+  if(!onRoad(c1x,c1z)){ const t=makeTrafficLight(state); t.position.set(c1x,0,c1z); t.rotation.y=Math.PI*0.25; furnitureGroup.add(t); }
+  if(!onRoad(c2x,c2z)){ const t=makeTrafficLight(state==='green'?'red':'green'); t.position.set(c2x,0,c2z); t.rotation.y=Math.PI*1.25; furnitureGroup.add(t); }
+}}
+// speed cameras along a few main roads
+[['CURZON STREET',false],['PARK LANE',true],['OXFORD STREET',false],['REGENT STREET',true]].forEach(([name,vertical])=>{
+  const s = vertical ? vStreets.find(t=>t.name===name) : hStreets.find(t=>t.name===name);
+  if(!s) return;
+  const cam=makeSpeedCamera();
+  if(vertical){ cam.position.set(s.c - s.w/2 - 2, 0, midZ + 30); cam.rotation.y=Math.PI/2; }
+  else { cam.position.set(midX - 30, 0, s.c - s.w/2 - 2); }
+  if(!onRoad(cam.position.x,cam.position.z)) furnitureGroup.add(cam);
+});
 
 setLoad(0.78, 'Building your cab…');
 
@@ -1148,6 +1238,7 @@ addEventListener('keydown', e=>{
   if(e.code==='KeyC') cycleCam();
   if(e.code==='KeyR') resetCar();
   if(e.code==='KeyH') horn();
+  if(e.code==='KeyM'){ mirrorOn=!mirrorOn; document.getElementById('mirror').classList.toggle('off', !mirrorOn); }
   if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
 });
 addEventListener('keyup', e=>{ keys[e.code]=false; });
@@ -1345,6 +1436,10 @@ function drawMinimap(){
   }
   // landmarks
   landmarks.forEach(l=>{ const [x,y]=toMap(l.x,l.z); mmx.fillStyle='#ffd166'; mmx.beginPath();mmx.arc(x,y,4,0,7);mmx.fill(); });
+  // taxi job target
+  if(job){ const t=job.stage==='toPickup'?job.from:job.to; const [x,y]=toMap(t.x,t.z);
+    mmx.fillStyle=job.stage==='toPickup'?'#2ecc71':'#ffb400'; mmx.beginPath();mmx.arc(x,y,6,0,7);mmx.fill();
+    mmx.strokeStyle='#fff'; mmx.lineWidth=2; mmx.beginPath();mmx.arc(x,y,6,0,7);mmx.stroke(); }
   // traffic dots
   mmx.fillStyle='#88909c';
   traffic.forEach(a=>{ const [x,y]=toMap(a.mesh.position.x,a.mesh.position.z); if(x>0&&x<W&&y>0&&y<H){mmx.fillRect(x-1,y-1,2,2);} });
@@ -1355,14 +1450,89 @@ function drawMinimap(){
 }
 
 // ============================================================
+//  TAXI SHIFT — pick up fares and drop them where they're going
+// ============================================================
+const cashEl=document.getElementById('cash'), jobEl=document.getElementById('jobtxt');
+let earnings=0, job=null, beamPulse=0;
+const beamGroup=new THREE.Group();
+const beamMat=new THREE.MeshBasicMaterial({color:0x2ecc71, transparent:true, opacity:0.4, depthWrite:false});
+const beam=new THREE.Mesh(new THREE.CylinderGeometry(1.7,1.7,34,20,1,true), beamMat); beam.position.y=17; beamGroup.add(beam);
+const ringMat=new THREE.MeshBasicMaterial({color:0x2ecc71, transparent:true, opacity:0.7, side:THREE.DoubleSide, depthWrite:false});
+const ring=new THREE.Mesh(new THREE.RingGeometry(2.4,3.3,30), ringMat); ring.rotation.x=-Math.PI/2; ring.position.y=0.1; beamGroup.add(ring);
+beamGroup.visible=false; scene.add(beamGroup);
+function setBeam(x,z,color){ beamGroup.position.set(x,0,z); beamMat.color.setHex(color); ringMat.color.setHex(color); beamGroup.visible=true; }
+// a passenger waiting at the pickup
+const passenger=makePed(); passenger.visible=false;
+function pickPoint(){
+  const horizontal=Math.random()<0.5;
+  const s = horizontal ? hStreets[(Math.random()*hStreets.length)|0] : vStreets[(Math.random()*vStreets.length)|0];
+  const lo=(horizontal?worldBounds.x0:worldBounds.z0)+25, hi=(horizontal?worldBounds.x1:worldBounds.z1)-25;
+  const pos=lo+Math.random()*(hi-lo);
+  const side=(Math.random()<0.5?1:-1)*(s.w/2+3);
+  return horizontal ? {x:pos, z:s.c+side, name:s.name} : {x:s.c+side, z:pos, name:s.name};
+}
+function newJob(){
+  const from=pickPoint(); let to=pickPoint(), guard=0;
+  while(Math.hypot(to.x-from.x,to.z-from.z)<90 && guard++<12) to=pickPoint();
+  const dist=Math.hypot(to.x-from.x,to.z-from.z);
+  job={stage:'toPickup', from, to, fare:Math.round(4+dist*0.09)};
+  setBeam(from.x,from.z,0x2ecc71);
+  passenger.position.set(from.x,0,from.z); passenger.visible=true;
+  jobEl.textContent='Pick up on '+from.name;
+}
+function updateTaxi(dt){
+  if(!job) return;
+  beamPulse+=dt; beamGroup.rotation.y+=dt*1.2;
+  const s=1+Math.sin(beamPulse*4)*0.15; ring.scale.set(s,s,s);
+  const tgt = job.stage==='toPickup' ? job.from : job.to;
+  const d=Math.hypot(tgt.x-player.position.x, tgt.z-player.position.z);
+  if(job.stage==='toPickup'){
+    if(d<7 && Math.abs(vehicle.speed)<14){
+      job.stage='toDropoff'; passenger.visible=false;
+      setBeam(job.to.x,job.to.z,0xffb400);
+      jobEl.textContent='Drop off on '+job.to.name+'  ·  £'+job.fare;
+      showPlace('Passenger in — to '+job.to.name+' (£'+job.fare+')'); horn();
+    }
+  } else {
+    if(d<7 && Math.abs(vehicle.speed)<9){
+      earnings+=job.fare; cashEl.textContent=earnings;
+      showPlace('Dropped off · +£'+job.fare);
+      job=null; beamGroup.visible=false; jobEl.textContent='Finding next fare…';
+      newJobSoon=0.6;
+    }
+  }
+}
+let newJobSoon=1.0;
+
+// ============================================================
 //  MAIN LOOP
 // ============================================================
 let last=performance.now();
-let started=false;
+// rear-view mirror
+const mirrorEl=document.getElementById('mirror');
+const rearCam=new THREE.PerspectiveCamera(72, 3.6, 0.5, 700);
+let mirrorOn=true;
+function renderMirror(){
+  if(!mirrorOn || mirrorEl.classList.contains('off')) return;
+  const r=mirrorEl.getBoundingClientRect();
+  if(r.width<10) return;
+  const mx=r.left, mw=r.width, mh=r.height, vy=innerHeight-r.bottom;
+  const back=new THREE.Vector3(Math.sin(player.rotation.y),0,Math.cos(player.rotation.y)); // points behind the car
+  rearCam.position.set(player.position.x, player.position.y+3.1, player.position.z);
+  rearCam.up.set(0,1,0);
+  rearCam.lookAt(player.position.x+back.x*40, player.position.y+2.2, player.position.z+back.z*40);
+  rearCam.aspect=mw/mh; rearCam.updateProjectionMatrix();
+  renderer.setScissorTest(true);
+  renderer.setScissor(mx,vy,mw,mh); renderer.setViewport(mx,vy,mw,mh);
+  renderer.render(scene, rearCam);
+  renderer.setScissorTest(false);
+  renderer.setViewport(0,0,innerWidth,innerHeight); renderer.setScissor(0,0,innerWidth,innerHeight);
+}
 function frame(now){
   const dt=Math.min(0.05,(now-last)/1000); last=now;
   update(dt);
   renderer.render(scene,camera);
+  renderMirror();
   requestAnimationFrame(frame);
 }
 
@@ -1424,6 +1594,10 @@ function update(dt){
   }
   updateSmoke(dt);
 
+  // ----- taxi shift -----
+  if(newJobSoon>0){ newJobSoon-=dt; if(newJobSoon<=0) newJob(); }
+  updateTaxi(dt);
+
   // ----- traffic & peds -----
   for(const a of traffic) updateAgent(a, dt);
   for(const p of peds){
@@ -1466,7 +1640,8 @@ addEventListener('resize', ()=>{
 
 // optional test hook
 if(/[?&]dbg=1/.test(location.search)){
-  window.__dbg = { get damage(){return damage;}, get shake(){return shake;}, traffic, player, addDamage };
+  window.__dbg = { get damage(){return damage;}, get shake(){return shake;}, traffic, player, addDamage,
+    newJob, get job(){return job;}, get beamVisible(){return beamGroup.visible;} };
 }
 // kick off after a short beat so the loader shows
 requestAnimationFrame(frame);
