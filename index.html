@@ -26,8 +26,13 @@
   #speedo .unit { font-size: 13px; opacity: .7; letter-spacing: 2px; }
   #speedo .gear { position:absolute; left:16px; bottom:14px; font-size:13px; opacity:.65; letter-spacing:1px;}
 
-  #compass { left: 20px; top: 20px; padding: 10px 16px; font-size: 14px; letter-spacing: 1px; }
-  #compass b { font-size: 20px; }
+  /* Damage / bodywork meter (bottom-right, above the speedo) */
+  #dmgwrap { right: 20px; bottom: 128px; width: 168px; padding: 9px 14px; }
+  #dmgwrap .dl { font-size: 10px; letter-spacing: 2px; opacity: .7; margin-bottom: 6px; }
+  #dmgwrap .dbar { height: 8px; border-radius: 5px; background: rgba(255,255,255,.14); overflow: hidden; }
+  #dmgwrap .dfill { height: 100%; width: 100%; border-radius: 5px;
+    background: linear-gradient(90deg, #34d17a, #ffd166 55%, #ff4d3d);
+    transform-origin: left; transition: transform .18s ease; }
 
   #place { left: 50%; top: 22px; transform: translateX(-50%); padding: 9px 22px; font-size: 15px; letter-spacing: .5px; opacity: 0; transition: opacity .4s; text-align:center;}
   #place.show { opacity: 1; }
@@ -87,13 +92,13 @@
 <div id="vignette"></div>
 
 <div id="hud">
-  <div id="compass" class="panel"><b id="dir">N</b> <span id="coords" style="opacity:.6"></span></div>
   <div id="minimap" class="panel"><canvas id="mm" width="360" height="360"></canvas><div class="mm-tag" id="mmTag">tap to expand</div></div>
   <div id="place" class="panel"></div>
   <div id="speedo" class="panel">
     <div class="val" id="spd">0</div><div class="unit">MPH</div>
     <div class="gear" id="gear">D</div>
   </div>
+  <div id="dmgwrap" class="panel"><div class="dl">BODYWORK</div><div class="dbar"><div class="dfill" id="dfill"></div></div></div>
   <div id="help" class="panel">
     <div class="t">London Drive</div>
     <div><kbd>W</kbd>/<kbd>↑</kbd> accelerate &nbsp; <kbd>S</kbd>/<kbd>↓</kbd> brake/reverse</div>
@@ -427,6 +432,8 @@ const landmarkPlan = [
   { i: g0+6, j: g0+6, type:'gherkin' },
   { i: g0+3, j: g0+4, type:'park' },
   { i: g0+5, j: g0+1, type:'towerbridge' },
+  { i: g0+1, j: g0+2, type:'square', name:'Berkeley Square' },
+  { i: g0+2, j: g0+5, type:'square', name:'Grosvenor Square' },
 ];
 landmarkPlan.forEach(l=>reserved.add(key(l.i,l.j)));
 
@@ -551,14 +558,19 @@ function buildMayfairBlock(i,j){
 }
 mayfairCells.forEach(([i,j])=> buildMayfairBlock(i,j));
 
-// Curzon Street sign (white plate, red Westminster header)
-function makeStreetSign(text, sub){
+// Curzon Street sign (white plate, red Westminster header) — texture cached per name
+const signTexCache={};
+function signTexture(text, sub){
+  const k=text+'|'+sub; if(signTexCache[k]) return signTexCache[k];
   const c=document.createElement('canvas'); c.width=256; c.height=88; const x=c.getContext('2d');
   x.fillStyle='#f4f2ec'; x.fillRect(0,0,256,88); x.fillStyle='#a01c2c'; x.fillRect(0,0,256,20);
   x.fillStyle='#fff'; x.font='bold 12px Arial'; x.textAlign='center'; x.fillText(sub,128,14);
   x.fillStyle='#111'; x.font='bold 34px Georgia'; x.fillText(text,128,58);
   x.strokeStyle='#111'; x.lineWidth=3; x.strokeRect(2,22,252,64);
-  const t=new THREE.CanvasTexture(c);
+  return signTexCache[k]=new THREE.CanvasTexture(c);
+}
+function makeStreetSign(text, sub){
+  const t=signTexture(text, sub);
   const g=new THREE.Group();
   const post=new THREE.Mesh(new THREE.CylinderGeometry(0.1,0.1,3.4,8), new THREE.MeshStandardMaterial({color:0x2a2a2e, metalness:0.4, roughness:0.6})); post.position.y=1.7; g.add(post);
   const plate=new THREE.Mesh(new THREE.BoxGeometry(3.4,1.2,0.1), new THREE.MeshStandardMaterial({map:t, roughness:0.6})); plate.position.y=3.4; g.add(plate);
@@ -570,6 +582,23 @@ function makeStreetSign(text, sub){
   sign.position.set((g0+2)*CELL + CELL/2 - 2, 0, curzonZ - ROAD/2 - 1.5);
   buildingGroup.add(sign);
 }
+
+// Real central-London street names on the main avenues so every road reads as
+// somewhere, not a repeat. Names run along each main road; the label a driver
+// sees names the road they're on.
+const londonHStreets = ['OXFORD STREET','PICCADILLY','THE STRAND','PALL MALL','MARYLEBONE ROAD','KNIGHTSBRIDGE','FLEET STREET','SHAFTESBURY AVENUE'];
+const londonVStreets = ['REGENT STREET','PARK LANE','BOND STREET','WHITEHALL','BAKER STREET','VICTORIA STREET','CHARING CROSS ROAD','SLOANE STREET'];
+const boroughs = ['CITY OF WESTMINSTER','ROYAL BOROUGH OF K&C','CITY OF LONDON','CAMDEN'];
+const mainList = roadLines.filter(isMain);
+// name every main junction so signs are spread across the whole map
+mainList.forEach((zc, zi)=>{
+  mainList.forEach((xc, xi)=>{
+    const hs = makeStreetSign(londonHStreets[zi%londonHStreets.length], boroughs[zi%boroughs.length]);
+    hs.position.set(xc + ROAD/2 + 2, 0, zc - ROAD/2 - 2); hs.rotation.y = Math.PI/2; buildingGroup.add(hs);
+    const vs = makeStreetSign(londonVStreets[xi%londonVStreets.length], boroughs[(xi+1)%boroughs.length]);
+    vs.position.set(xc - ROAD/2 - 2, 0, zc + ROAD/2 + 2); buildingGroup.add(vs);
+  });
+});
 
 setLoad(0.5, 'Placing landmarks…');
 
@@ -695,6 +724,30 @@ function makeTree(x,z){
   return t;
 }
 
+// leafy Mayfair-style garden square with iron railings and a central statue
+function addSquare(x,z,name){
+  const g = new THREE.Group();
+  const S = BLOCK-2;
+  const grass = new THREE.Mesh(new THREE.PlaneGeometry(S,S), new THREE.MeshStandardMaterial({color:0x4d7a38, roughness:1}));
+  grass.rotation.x=-Math.PI/2; grass.position.y=0.03; grass.receiveShadow=true; g.add(grass);
+  // gravel cross paths
+  const pathMat=new THREE.MeshStandardMaterial({color:0xb7ac93, roughness:1});
+  const p1=new THREE.Mesh(new THREE.PlaneGeometry(S,3),pathMat); p1.rotation.x=-Math.PI/2; p1.position.y=0.04; g.add(p1);
+  const p2=new THREE.Mesh(new THREE.PlaneGeometry(3,S),pathMat); p2.rotation.x=-Math.PI/2; p2.position.y=0.04; g.add(p2);
+  // perimeter railings on all four sides
+  const half=S/2;
+  for(const s of [[0,half,0],[0,-half,0],[half,0,Math.PI/2],[-half,0,Math.PI/2]]){
+    const r=makeRailings(S); r.position.set(s[0],0,s[1]); if(s[2]) r.rotation.y=s[2]; g.add(r);
+  }
+  // ring of plane trees
+  for(let k=0;k<16;k++){ const a=k/16*Math.PI*2, rr=half-4; g.add(makeTree(Math.cos(a)*rr, Math.sin(a)*rr)); }
+  // central statue on a plinth
+  const plinth=new THREE.Mesh(new THREE.CylinderGeometry(1.2,1.5,2,12), new THREE.MeshStandardMaterial({color:0xcfc7b6, roughness:0.9})); plinth.position.y=1; plinth.castShadow=true; g.add(plinth);
+  const statue=new THREE.Mesh(new THREE.CylinderGeometry(0.4,0.5,3,8), new THREE.MeshStandardMaterial({color:0x4b5a52, metalness:0.4, roughness:0.6})); statue.position.y=3.5; statue.castShadow=true; g.add(statue);
+  g.position.set(x,0,z); scene.add(g);
+  landmarks.push({name, x, z, r:34});
+}
+
 function addTowerBridge(x,z){
   const g = new THREE.Group();
   // Thames water under the bridge
@@ -771,6 +824,7 @@ landmarkPlan.forEach(l=>{
   else if(l.type==='gherkin') addGherkin(x,z);
   else if(l.type==='park') addPark(x,z);
   else if(l.type==='towerbridge') addTowerBridge(x,z);
+  else if(l.type==='square') addSquare(x,z,l.name);
 });
 
 setLoad(0.65, 'Adding street furniture…');
@@ -899,11 +953,11 @@ function makeCar(bodyColor=0x0b0b0d, taxi=false, detailed=false){
     add(box(1.98,0.16,2.5,new THREE.MeshStandardMaterial({color:0xf3f5f7, roughness:0.5})), 0,2.2,0.15);
     add(box(0.95,0.3,0.4,new THREE.MeshStandardMaterial({color:0xffd23f, emissive:0xffb800, emissiveIntensity:0.9})), 0,2.44,0.15);
   }
-  return { car, wheels };
+  return { car, wheels, paint };
 }
 
 // Player drives a bright pillar-box-red London cab so it never blends with tarmac
-const { car: player, wheels: playerWheels } = makeCar(0xe23b2e, true, true);
+const { car: player, wheels: playerWheels, paint: playerPaint } = makeCar(0xe23b2e, true, true);
 player.position.set(CELL*0.5 + ROAD/4, 0, HALF - CELL*1.5); // start in a lane, facing into the city
 { // optional ?at=x,z[,ry] spawn override (handy for jumping straight to a spot)
   const at=(location.search.match(/[?&]at=([-\d.]+),([-\d.]+)(?:,([-\d.]+))?/));
@@ -954,7 +1008,25 @@ function spawnAgent(isBus){
   traffic.push(a);
   updateAgent(a, 0, true);
 }
+function respawnAgent(a){
+  a.horizontal = Math.random()<0.5;
+  a.line = roadLines[(Math.random()*roadLines.length)|0];
+  a.dir = Math.random()<0.5?1:-1;
+  a.laneOff = a.dir>0 ? ROAD/4 : -ROAD/4;
+  a.pos = a.dir>0 ? -HALF-15 : HALF+15;
+  a.hit = 0;
+}
 function updateAgent(a, dt, init){
+  if (a.hit > 0){
+    // knocked flying — free physics, spin, tumble, then recycle
+    a.hit -= dt;
+    a.mesh.position.x += a.vx*dt; a.mesh.position.z += a.vz*dt;
+    a.mesh.position.y = Math.max(0, a.mesh.position.y + a.vy*dt); a.vy -= 9*dt;
+    if(a.mesh.position.y<=0){ a.vy = a.vy<-2 ? -a.vy*0.35 : 0; a.vx*=0.7; a.vz*=0.7; }
+    a.mesh.rotation.y += a.vspin*dt; a.mesh.rotation.z += a.vroll*dt;
+    if (a.hit<=0){ a.mesh.rotation.set(0,0,0); a.mesh.position.y=0; respawnAgent(a); }
+    return;
+  }
   a.pos += a.dir * a.speed * dt;
   if (a.pos > HALF+20) a.pos = -HALF-20;
   if (a.pos < -HALF-20) a.pos = HALF+20;
@@ -965,6 +1037,30 @@ function updateAgent(a, dt, init){
   } else {
     a.mesh.position.set(a.line + a.laneOff, 0, a.pos);
     a.mesh.rotation.y = a.dir>0 ? Math.PI : 0;
+  }
+}
+// player rams a traffic car → knock it flying and take some damage
+function checkTrafficHits(){
+  const ps = Math.abs(vehicle.speed);
+  for(const a of traffic){
+    if(a.hit>0) continue;
+    const dx = a.mesh.position.x - player.position.x;
+    const dz = a.mesh.position.z - player.position.z;
+    const near = a.isBus ? 4.6 : 3.4;
+    if(dx*dx+dz*dz < near*near){
+      const d = Math.hypot(dx,dz)||1;
+      const force = 8 + ps*0.9;
+      a.hit = 1.4 + Math.random()*0.6;
+      a.vx = (dx/d)*force; a.vz = (dz/d)*force;
+      // carry the player's travel direction into the knock
+      const fwd = new THREE.Vector3(-Math.sin(player.rotation.y),0,-Math.cos(player.rotation.y));
+      a.vx += fwd.x*ps*0.8; a.vz += fwd.z*ps*0.8;
+      a.vy = 3 + ps*0.25; a.vspin = (Math.random()-0.5)*6; a.vroll = (Math.random()-0.5)*5;
+      if(a.isBus){ a.vx*=0.4; a.vz*=0.4; a.vy*=0.4; } // buses barely budge
+      const impact = Math.min(1, ps*0.03 + 0.15) * (a.isBus?1.8:1);
+      addDamage((a.isBus?18:9) + ps*0.3, impact);
+      vehicle.speed *= a.isBus ? 0.5 : 0.82; // plough through, lose a little speed
+    }
   }
 }
 for(let k=0;k<26;k++) spawnAgent(false);
@@ -1029,6 +1125,45 @@ function horn(){
     o.stop(actx.currentTime+0.5);
   }catch(e){}
 }
+// crash/crunch — a short burst of filtered noise
+function crunch(vol){
+  try{
+    actx = actx || new (window.AudioContext||window.webkitAudioContext)();
+    const n = actx.sampleRate*0.25, buf = actx.createBuffer(1, n, actx.sampleRate), data = buf.getChannelData(0);
+    for(let i=0;i<n;i++){ data[i] = (Math.random()*2-1) * (1-i/n); }
+    const src = actx.createBufferSource(); src.buffer = buf;
+    const g = actx.createGain(); g.gain.value = 0.28*vol;
+    const f = actx.createBiquadFilter(); f.type='lowpass'; f.frequency.value = 900 + 1400*vol;
+    src.connect(f); f.connect(g); g.connect(actx.destination); src.start();
+    g.gain.setValueAtTime(0.28*vol, actx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime+0.25);
+  }catch(e){}
+}
+
+// ============================================================
+//  SMOKE — a small pool of puffs that leak from a damaged engine
+// ============================================================
+const smokeTex = (()=>{ const c=document.createElement('canvas'); c.width=c.height=64; const x=c.getContext('2d');
+  const gr=x.createRadialGradient(32,32,2,32,32,30); gr.addColorStop(0,'rgba(80,80,84,0.9)'); gr.addColorStop(1,'rgba(80,80,84,0)');
+  x.fillStyle=gr; x.fillRect(0,0,64,64); return new THREE.CanvasTexture(c); })();
+const smokePool=[]; let smokeI=0;
+for(let i=0;i<16;i++){
+  const s=new THREE.Sprite(new THREE.SpriteMaterial({map:smokeTex, transparent:true, opacity:0, depthWrite:false}));
+  s.scale.set(2,2,2); s.visible=false; scene.add(s); smokePool.push({s, life:0, vy:0});
+}
+let smokeTimer=0;
+function emitSmoke(x,y,z){
+  const p=smokePool[smokeI=(smokeI+1)%smokePool.length];
+  p.s.position.set(x+(Math.random()-0.5), y, z+(Math.random()-0.5));
+  p.s.material.opacity=0.6; p.s.visible=true; p.life=1; p.vy=1.4+Math.random();
+}
+function updateSmoke(dt){
+  for(const p of smokePool){ if(p.life<=0) continue;
+    p.life-=dt*0.7; p.s.position.y+=p.vy*dt; const sc=2+(1-p.life)*3; p.s.scale.set(sc,sc,sc);
+    p.s.material.opacity=Math.max(0,p.life*0.6);
+    if(p.life<=0) p.s.visible=false;
+  }
+}
 
 // ============================================================
 //  VEHICLE PHYSICS (arcade)
@@ -1046,26 +1181,45 @@ const vehicle = {
 player.rotation.y = 0; // local -Z is forward → faces into the city
 vehicle.heading = player.rotation.y;
 
+// ----- damage / impact state -----
+let damage = 0;      // 0 (mint) .. 100 (wreck)
+let shake = 0;       // camera shake amount, decays
+let jolt = 0;        // body pitch/roll jolt on impact
+function addDamage(amount, impact){
+  damage = Math.min(100, damage + amount);
+  shake = Math.min(1.2, shake + impact);
+  jolt = Math.min(0.5, jolt + impact*0.3);
+  crunch(Math.min(1, impact));
+  updateWreck();
+}
 function resetCar(){
   player.position.set(CELL*0.5 + ROAD/4, 0, HALF - CELL*1.5);
   player.rotation.set(0, 0, 0);
   vehicle.speed = 0; vehicle.heading = 0;
-  showPlace('Reset');
+  damage = 0; shake = 0; jolt = 0; updateWreck();
+  showPlace('Repaired');
+}
+// visual wreck: darken paint and lean the car as damage rises
+function updateWreck(){
+  const g = 1 - damage/160;
+  playerPaint.color.setRGB(0.886*g+0.05, 0.231*g+0.03, 0.180*g+0.03);
+  playerPaint.emissiveIntensity = Math.max(0.05, 0.5*(1-damage/100));
 }
 
-// collision: keep player out of building boxes (simple push-out)
+// collision: buildings block (with a crash), the world edge clamps
 function resolveCollision(px, pz){
   for(const c of colliders){
     const dx = px - c.x, dz = pz - c.z;
     const ox = (c.hw + 1.2) - Math.abs(dx);
     const oz = (c.hd + 1.2) - Math.abs(dz);
     if(ox>0 && oz>0){
-      // push out along least-penetration axis
-      if(ox < oz){ px = c.x + Math.sign(dx||1)*(c.hw+1.2); vehicle.speed*=0.3; }
-      else { pz = c.z + Math.sign(dz||1)*(c.hd+1.2); vehicle.speed*=0.3; }
+      const impact = Math.abs(vehicle.speed);
+      if(impact > 6) addDamage(impact*0.35, impact*0.03);
+      if(ox < oz){ px = c.x + Math.sign(dx||1)*(c.hw+1.2); }
+      else { pz = c.z + Math.sign(dz||1)*(c.hd+1.2); }
+      vehicle.speed *= 0.35;
     }
   }
-  // world bounds
   const B = HALF + CELL;
   px = Math.max(-B, Math.min(B, px));
   pz = Math.max(-B, Math.min(B, pz));
@@ -1092,6 +1246,11 @@ function updateCamera(dt){
   const lerp = camMode===2 ? 1 : 1-Math.pow(0.0015, dt);
   camera.position.lerp(desired, lerp);
   camTarget.lerp(look, lerp);
+  // crash shake
+  if(shake>0.001){
+    const t=performance.now()*0.06, s=shake*0.9;
+    camera.position.x += Math.sin(t*1.7)*s; camera.position.y += Math.sin(t*2.3)*s*0.7; camera.position.z += Math.cos(t*1.9)*s;
+  }
   camera.lookAt(camTarget);
 }
 camTarget.copy(player.position);
@@ -1099,11 +1258,10 @@ camTarget.copy(player.position);
 // ============================================================
 //  HUD
 // ============================================================
-const spdEl=document.getElementById('spd'), dirEl=document.getElementById('dir'), coordsEl=document.getElementById('coords'), gearEl=document.getElementById('gear');
+const spdEl=document.getElementById('spd'), gearEl=document.getElementById('gear'), dfillEl=document.getElementById('dfill');
 const placeEl=document.getElementById('place');
 let placeTimer=0;
 function showPlace(txt){ placeEl.textContent=txt; placeEl.classList.add('show'); placeTimer=2.6; }
-const compassDirs=['N','NE','E','SE','S','SW','W','NW'];
 let lastLandmark=null;
 
 // minimap — tap/click to expand or shrink
@@ -1191,15 +1349,25 @@ function update(dt){
   [nx,nz]=resolveCollision(nx,nz);
   player.position.x=nx; player.position.z=nz;
 
-  // slight body roll & wheel spin
+  // slight body roll & wheel spin (+ crash jolt)
   const rollTarget = -vehicle.steer*0.06*speedFactor;
   player.rotation.z += (rollTarget - player.rotation.z)*Math.min(1,dt*6);
+  jolt = Math.max(0, jolt - dt*2.2);
+  player.rotation.x = jolt * (Math.sin(performance.now()*0.05));
   const spin = vehicle.speed*dt/0.55;
   playerWheels.forEach((w,i)=>{ w.children[0].rotation.x += spin; w.children[1].rotation.x += spin;
     if(i<2){ w.rotation.y = vehicle.steer*0.4; } });
 
-  // headlight subtle (kept off by day, but on for tunnels/shadows feel)
-  // headlight.intensity = 0;
+  // ----- collisions with traffic (ram them) + damage smoke -----
+  checkTrafficHits();
+  shake = Math.max(0, shake - dt*2.5);
+  smokeTimer -= dt;
+  if(damage > 55 && smokeTimer <= 0){
+    const f = new THREE.Vector3(-Math.sin(player.rotation.y),0,-Math.cos(player.rotation.y));
+    emitSmoke(player.position.x + f.x*2, 1.4, player.position.z + f.z*2);
+    smokeTimer = damage>85 ? 0.10 : 0.22;
+  }
+  updateSmoke(dt);
 
   // ----- traffic & peds -----
   for(const a of traffic) updateAgent(a, dt);
@@ -1221,10 +1389,7 @@ function update(dt){
   const mph=Math.round(Math.abs(vehicle.speed)*2.1);
   spdEl.textContent=mph;
   gearEl.textContent = vehicle.speed<-0.3 ? 'R' : 'D';
-  // compass
-  let ang=(player.rotation.y*180/Math.PI)%360; if(ang<0)ang+=360;
-  dirEl.textContent=compassDirs[Math.round(ang/45)%8];
-  coordsEl.textContent = `${Math.round(player.position.x)}, ${Math.round(player.position.z)}`;
+  dfillEl.style.transform = 'scaleX('+(1-damage/100).toFixed(3)+')';
   // landmark proximity
   let near=null,nd=1e9;
   for(const l of landmarks){ const d=Math.hypot(l.x-player.position.x,l.z-player.position.z); if(d<l.r && d<nd){nd=d;near=l;} }
@@ -1243,6 +1408,10 @@ addEventListener('resize', ()=>{
   renderer.setSize(innerWidth,innerHeight);
 });
 
+// optional test hook
+if(/[?&]dbg=1/.test(location.search)){
+  window.__dbg = { get damage(){return damage;}, get shake(){return shake;}, traffic, player, addDamage };
+}
 // kick off after a short beat so the loader shows
 requestAnimationFrame(frame);
 setTimeout(()=>{
