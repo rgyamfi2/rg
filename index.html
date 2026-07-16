@@ -47,16 +47,32 @@
   #load small { color:#5a6474; margin-top:20px; font-size:12px;}
 
   /* Mobile controls */
-  #touch { position: fixed; inset: 0; pointer-events: none; display: none; z-index: 20;}
-  .tbtn { position: absolute; pointer-events: auto; width: 78px; height: 78px; border-radius: 50%;
-    background: rgba(255,255,255,.10); border: 1.5px solid rgba(255,255,255,.28); color: #fff;
-    font-size: 30px; display: flex; align-items: center; justify-content: center; user-select: none; -webkit-user-select:none; -webkit-tap-highlight-color: transparent;}
-  .tbtn:active { background: rgba(255,255,255,.28); }
-  #t-gas { right: 26px; bottom: 120px; }
-  #t-brake { right: 118px; bottom: 44px; }
-  #t-left { left: 26px; bottom: 60px; }
-  #t-right { left: 122px; bottom: 60px; }
-  @media (hover: none) and (pointer: coarse) { #touch { display: block; } #help{display:none;} }
+  #touch { position: fixed; inset: 0; pointer-events: none; display: none; z-index: 20; }
+  .tbtn { pointer-events: auto; user-select: none; -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent; display: flex; align-items: center; justify-content: center;
+    color: #fff; font-weight: 800; transition: transform .06s ease, filter .06s ease; }
+  .tbtn:active { transform: scale(0.94); filter: brightness(1.25); }
+
+  /* Steering rocker, bottom-left */
+  #steer { position: absolute; left: 20px; bottom: 26px; display: flex; gap: 10px; }
+  .tbtn.steer { width: 84px; height: 96px; border-radius: 20px;
+    background: linear-gradient(180deg, rgba(60,72,92,.72), rgba(30,38,52,.72));
+    border: 1.5px solid rgba(255,255,255,.30); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    font-size: 40px; box-shadow: 0 6px 18px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.18); }
+
+  /* Pedals, bottom-right */
+  #pedals { position: absolute; right: 20px; bottom: 26px; display: flex; gap: 12px; align-items: flex-end; }
+  .tbtn.pedal { width: 82px; height: 150px; border-radius: 22px; flex-direction: column; gap: 6px;
+    border: 1.5px solid rgba(255,255,255,.28); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    box-shadow: 0 8px 22px rgba(0,0,0,.4), inset 0 2px 0 rgba(255,255,255,.22); }
+  .tbtn.pedal .ico { font-size: 34px; line-height: 1; }
+  .tbtn.pedal .lbl { font-size: 12px; letter-spacing: 2px; opacity: .92; }
+  #t-gas   { background: linear-gradient(180deg, #2ec36b, #14964a); }
+  #t-brake { background: linear-gradient(180deg, #ff5a52, #d5271e); height: 118px; }
+
+  @media (hover: none) and (pointer: coarse) { #touch { display: block; } #help { display: none; } }
+  /* let people force-show controls with ?touch=1 for testing */
+  #touch.force { display: block; }
 </style>
 </head>
 <body>
@@ -79,10 +95,14 @@
 </div>
 
 <div id="touch">
-  <div class="tbtn" id="t-left">◀</div>
-  <div class="tbtn" id="t-right">▶</div>
-  <div class="tbtn" id="t-gas">▲</div>
-  <div class="tbtn" id="t-brake">■</div>
+  <div id="steer">
+    <div class="tbtn steer" id="t-left">‹</div>
+    <div class="tbtn steer" id="t-right">›</div>
+  </div>
+  <div id="pedals">
+    <div class="tbtn pedal" id="t-brake"><span class="ico">▾</span><span class="lbl">BRAKE</span></div>
+    <div class="tbtn pedal" id="t-gas"><span class="ico">▴</span><span class="lbl">GO</span></div>
+  </div>
 </div>
 
 <div id="load">
@@ -203,9 +223,9 @@ function onRoad(x, z){
 }
 
 // ---------- Roads (asphalt) with lane markings ----------
-const roadMat = new THREE.MeshStandardMaterial({ color: 0x2b2e33, roughness: 0.95 });
-const lineMat = new THREE.MeshStandardMaterial({ color: 0xf2e34a, roughness: 0.6 });
-const pavementMat = new THREE.MeshStandardMaterial({ color: 0x8d9099, roughness: 1 });
+const roadMat = new THREE.MeshStandardMaterial({ color: 0x3a3f47, roughness: 0.95 }); // lighter London tarmac
+const lineMat = new THREE.MeshStandardMaterial({ color: 0xe9edf0, roughness: 0.5 });    // UK white lines
+const pavementMat = new THREE.MeshStandardMaterial({ color: 0x9aa0a8, roughness: 1 });
 
 const roadGroup = new THREE.Group(); scene.add(roadGroup);
 const roadSpan = 2*HALF + ROAD;
@@ -242,10 +262,15 @@ for (const c of roadLines){
 setLoad(0.25, 'Raising the buildings…');
 
 // ---------- Buildings ----------
-// Reusable box geometry per height; use a palette of London-ish facades.
-const facadeColors = [0x9b7a5a, 0xb08d6a, 0x7d6f63, 0xa8a29a, 0xc4b7a6, 0x8a5a44, 0x6f7d86, 0xd9cdb8];
-const roofColor = 0x40444b;
-const winMat = new THREE.MeshStandardMaterial({ color: 0x1b2430, roughness: 0.3, metalness: 0.2, emissive: 0x0a1622, emissiveIntensity: 0.6 });
+// London palette: red/brown brick, London stock (yellow-grey) brick, Portland
+// stone, painted stucco. Glass towers are reserved for the "City" cluster only.
+const brickColors = [0x9c5a44, 0xb06a4e, 0x8a4d3a, 0xa5674a]; // red brick terraces
+const stockColors = [0xbdae8a, 0xc9bd9c, 0xb3a684];          // London stock brick
+const stoneColors = [0xdcd4c2, 0xe6ded0, 0xcfc7b6];          // Portland stone
+const stuccoColors= [0xe9e7e0, 0xf0ede4, 0xdfe0da];          // white/cream stucco (Notting Hill / Belgravia)
+const londonFacades = [...brickColors, ...brickColors, ...stockColors, ...stockColors, ...stoneColors, ...stuccoColors];
+const glassColors = [0x8fa6b4, 0x9db4b0, 0xa7b6c2, 0x7f9aae]; // City towers
+const slate = 0x4a4e55, terracotta = 0x9c4a30; // roof tones
 
 const buildingGeoCache = {};
 function boxGeo(w,h,d){ const k=w+'_'+h+'_'+d; return buildingGeoCache[k] || (buildingGeoCache[k]=new THREE.BoxGeometry(w,h,d)); }
@@ -253,25 +278,60 @@ function boxGeo(w,h,d){ const k=w+'_'+h+'_'+d; return buildingGeoCache[k] || (bu
 const buildingGroup = new THREE.Group(); scene.add(buildingGroup);
 const colliders = []; // {x,z,hw,hd} axis-aligned building boxes for collision
 
-// window texture (procedural canvas) — gives buildings a glassy facade look
-function makeFacadeTexture(color){
+// Georgian/Victorian sash-window facade texture (tall paned windows, warm glow)
+function makeFacadeTexture(color, glassy){
   const c = document.createElement('canvas'); c.width=64; c.height=128;
   const ctx = c.getContext('2d');
   ctx.fillStyle = '#'+new THREE.Color(color).getHexString(); ctx.fillRect(0,0,64,128);
-  ctx.fillStyle = 'rgba(20,30,42,0.9)';
-  for(let y=8;y<128;y+=16){ for(let x=8;x<64;x+=16){ ctx.fillRect(x,y,9,10);} }
-  // slight window glow variation
-  for(let y=8;y<128;y+=16){ for(let x=8;x<64;x+=16){ if(Math.random()<0.15){ctx.fillStyle='rgba(255,214,140,0.5)';ctx.fillRect(x,y,9,10);ctx.fillStyle='rgba(20,30,42,0.9)';}}}
+  if(glassy){
+    // curtain-wall glazing for City towers
+    ctx.fillStyle='rgba(25,38,52,0.92)';
+    for(let y=6;y<128;y+=12){ for(let x=6;x<64;x+=13){ ctx.fillRect(x,y,10,9);} }
+    for(let y=6;y<128;y+=12){ for(let x=6;x<64;x+=13){ if(Math.random()<0.12){ctx.fillStyle='rgba(255,220,150,0.5)';ctx.fillRect(x,y,10,9);ctx.fillStyle='rgba(25,38,52,0.92)';}}}
+  } else {
+    // stone lintels + tall sash windows with a glazing bar
+    for(let y=12;y<128;y+=26){
+      ctx.fillStyle='rgba(255,255,255,0.10)'; ctx.fillRect(4,y-3,56,3); // stringcourse
+      for(let x=9;x<64;x+=18){
+        ctx.fillStyle='rgba(22,30,40,0.88)'; ctx.fillRect(x,y,11,18);   // window
+        ctx.fillStyle='rgba(240,240,235,0.5)'; ctx.fillRect(x+5,y,1,18); // vertical bar
+        ctx.fillRect(x,y+8,11,1);                                        // sash bar
+        if(Math.random()<0.16){ ctx.fillStyle='rgba(255,214,140,0.55)'; ctx.fillRect(x+1,y+1,9,7);} // lit
+      }
+    }
+  }
   const t = new THREE.CanvasTexture(c);
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   return t;
 }
 const facadeTexCache = {};
-function facadeMat(color, w, h){
-  if(!facadeTexCache[color]) facadeTexCache[color] = makeFacadeTexture(color);
-  const t = facadeTexCache[color].clone(); t.needsUpdate = true;
-  t.repeat.set(Math.max(1,Math.round(w/6)), Math.max(1,Math.round(h/5)));
-  return new THREE.MeshStandardMaterial({ map: t, roughness: 0.8, metalness: 0.05 });
+function facadeMat(color, w, h, glassy){
+  const key = color+(glassy?'-g':'');
+  if(!facadeTexCache[key]) facadeTexCache[key] = makeFacadeTexture(color, glassy);
+  const t = facadeTexCache[key].clone(); t.needsUpdate = true;
+  t.repeat.set(Math.max(1,Math.round(w/8)), Math.max(1,Math.round(h/(glassy?7:5))));
+  return new THREE.MeshStandardMaterial({ map: t, roughness: glassy?0.25:0.85, metalness: glassy?0.35:0.03 });
+}
+
+// pitched roof (triangular prism) for low-rise terraces + a chimney or two
+function addPitchedRoof(parent, bx, bz, w, d, baseY, col){
+  const rh = 1.5 + Math.min(w,d)*0.18;
+  const geo = new THREE.BufferGeometry();
+  const hw=w/2, hd=d/2;
+  // ridge runs along X
+  const v = new Float32Array([
+    -hw,0,-hd,  hw,0,-hd,  hw,0,hd,  -hw,0,hd,      // eaves (0-3)
+    -hw,rh,0,   hw,rh,0,                             // ridge (4-5)
+  ]);
+  const idx=[0,1,5, 0,5,4, 3,2,1, 3,1,0, 2,3,4, 2,4,5, 0,4,3, 1,2,5];
+  geo.setAttribute('position', new THREE.BufferAttribute(v,3));
+  geo.setIndex(idx); geo.computeVertexNormals();
+  const roof = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({color:col, roughness:0.9, flatShading:true}));
+  roof.position.set(bx, baseY, bz); roof.castShadow=true; parent.add(roof);
+  // chimney
+  const ch = new THREE.Mesh(boxGeo(1.1, 2.4, 1.1), new THREE.MeshStandardMaterial({color:0x7a5c4a, roughness:1}));
+  ch.position.set(bx + (rnd()-0.5)*w*0.5, baseY+1.2, bz + (rnd()<0.5?-1:1)*hd*0.5);
+  ch.castShadow=true; parent.add(ch);
 }
 
 // A small deterministic PRNG so the city is stable each load
@@ -289,37 +349,63 @@ const landmarkPlan = [
   { i: g0+6, j: g0+3, type:'eye' },
   { i: g0+4, j: g0+6, type:'stpauls' },
   { i: g0+7, j: g0+7, type:'shard' },
-  { i: g0+1, j: g0+6, type:'gherkin' },
+  { i: g0+6, j: g0+6, type:'gherkin' },
   { i: g0+3, j: g0+4, type:'park' },
+  { i: g0+5, j: g0+1, type:'towerbridge' },
 ];
 landmarkPlan.forEach(l=>reserved.add(key(l.i,l.j)));
 
 function blockCenter(i,j){ return { x: i*CELL, z: j*CELL }; }
+
+// The "City of London" financial cluster — glass towers live only here, near
+// the Gherkin & Shard. Everywhere else is low-rise London brick & stone.
+function isCity(i,j){ return (i >= g0+5) && (j >= g0+5); }
 
 // fill ordinary blocks with clusters of buildings
 for (let i = g0; i <= (GRID-1)/2; i++){
   for (let j = g0; j <= (GRID-1)/2; j++){
     if (reserved.has(key(i,j))) continue;
     const { x, z } = blockCenter(i,j);
-    // subdivide block into up to 2x2 buildings
-    const div = rnd() < 0.45 ? 2 : 1;
+    const city = isCity(i,j);
+    // terraces subdivide more (row of houses); City blocks are single towers
+    const div = city ? (rnd()<0.5?1:2) : (rnd() < 0.6 ? 2 : 1);
     const sub = BLOCK / div;
     for (let a=0;a<div;a++){
       for (let b=0;b<div;b++){
-        if (div===2 && rnd()<0.12) continue; // occasional gap / courtyard
+        if (div===2 && rnd()<0.1) continue; // occasional gap / courtyard
         const pad = 2 + rnd()*2;
         const w = sub - pad, d = sub - pad;
-        const h = 8 + Math.pow(rnd(),1.6)*46;
         const bx = x - BLOCK/2 + sub*(a+0.5);
         const bz = z - BLOCK/2 + sub*(b+0.5);
-        const col = facadeColors[(Math.random()*facadeColors.length)|0];
-        const mesh = new THREE.Mesh(boxGeo(w,h,d), facadeMat(col, w, h));
-        mesh.position.set(bx, h/2, bz);
-        mesh.castShadow = true; mesh.receiveShadow = true;
-        buildingGroup.add(mesh);
-        // roof cap
-        const roof = new THREE.Mesh(boxGeo(w+0.4, 1.2, d+0.4), new THREE.MeshStandardMaterial({color:roofColor, roughness:0.9}));
-        roof.position.set(bx, h+0.6, bz); roof.castShadow=true; buildingGroup.add(roof);
+
+        if (city){
+          // tall glass tower
+          const h = 34 + Math.pow(rnd(),1.3)*54;
+          const col = glassColors[(rnd()*glassColors.length)|0];
+          const mesh = new THREE.Mesh(boxGeo(w,h,d), facadeMat(col, w, h, true));
+          mesh.position.set(bx, h/2, bz); mesh.castShadow=true; mesh.receiveShadow=true;
+          buildingGroup.add(mesh);
+          const cap = new THREE.Mesh(boxGeo(w*0.7,1.4,d*0.7), new THREE.MeshStandardMaterial({color:slate, roughness:0.7, metalness:0.4}));
+          cap.position.set(bx, h+0.7, bz); buildingGroup.add(cap);
+        } else {
+          // low-rise London brick/stone terrace (3–7 storeys)
+          const storeys = 3 + (rnd()*5|0);
+          const h = storeys * 3.4;
+          const col = londonFacades[(rnd()*londonFacades.length)|0];
+          const mesh = new THREE.Mesh(boxGeo(w,h,d), facadeMat(col, w, h, false));
+          mesh.position.set(bx, h/2, bz); mesh.castShadow=true; mesh.receiveShadow=true;
+          buildingGroup.add(mesh);
+          // cornice
+          const cor = new THREE.Mesh(boxGeo(w+0.5, 0.7, d+0.5), new THREE.MeshStandardMaterial({color:0xefe9dd, roughness:0.9}));
+          cor.position.set(bx, h+0.35, bz); buildingGroup.add(cor);
+          // pitched slate/terracotta roof on the shorter ones, flat parapet on taller
+          if (storeys <= 5){
+            addPitchedRoof(buildingGroup, bx, bz, w+0.5, d+0.5, h+0.7, rnd()<0.6?slate:terracotta);
+          } else {
+            const para = new THREE.Mesh(boxGeo(w+0.5,1.3,d+0.5), new THREE.MeshStandardMaterial({color:0xe9e3d6, roughness:0.9}));
+            para.position.set(bx, h+1.3, bz); buildingGroup.add(para);
+          }
+        }
         colliders.push({ x:bx, z:bz, hw:w/2, hd:d/2 });
       }
     }
@@ -449,6 +535,73 @@ function makeTree(x,z){
   return t;
 }
 
+function addTowerBridge(x,z){
+  const g = new THREE.Group();
+  // Thames water under the bridge
+  const water = new THREE.Mesh(new THREE.PlaneGeometry(BLOCK+ROAD, 20),
+    new THREE.MeshStandardMaterial({color:0x35617a, metalness:0.5, roughness:0.12}));
+  water.rotation.x=-Math.PI/2; water.position.y=0.04; water.receiveShadow=true; g.add(water);
+  const stone = new THREE.MeshStandardMaterial({color:0xdad3c2, roughness:0.85}); // Portland stone
+  const blue  = new THREE.MeshStandardMaterial({color:0x2f6fb0, roughness:0.5, metalness:0.3}); // Victorian blue
+  // two towers
+  const towerX = 11;
+  for(const sx of [-towerX, towerX]){
+    const base = new THREE.Mesh(new THREE.BoxGeometry(6,20,8), stone); base.position.set(sx,10,0); base.castShadow=true; g.add(base);
+    // corner turrets + central spire
+    for(const cx of [-2.2,2.2]) for(const cz of [-2.8,2.8]){
+      const tur=new THREE.Mesh(new THREE.CylinderGeometry(0.7,0.7,4,10), stone); tur.position.set(sx+cx,21,cz); g.add(tur);
+      const cap=new THREE.Mesh(new THREE.ConeGeometry(1,3,10), blue); cap.position.set(sx+cx,24,cz); g.add(cap);
+    }
+    const spire=new THREE.Mesh(new THREE.ConeGeometry(2.4,7,4), blue); spire.rotation.y=Math.PI/4; spire.position.set(sx,25,0); spire.castShadow=true; g.add(spire);
+    colliders.push({x:x+sx,z:z,hw:3,hd:4});
+  }
+  // high-level walkways (two parallel blue spans between tower tops)
+  for(const wz of [-2.4,2.4]){
+    const span=new THREE.Mesh(new THREE.BoxGeometry(towerX*2-6,1.2,1.2), blue);
+    span.position.set(0,17,wz); g.add(span);
+  }
+  // road deck between towers
+  const deck=new THREE.Mesh(new THREE.BoxGeometry(towerX*2-6,0.6,7), new THREE.MeshStandardMaterial({color:0x3a3f47, roughness:0.9}));
+  deck.position.set(0,6,0); g.add(deck);
+  // suspension chains out to the banks
+  for(const sx of [-1,1]){
+    const chain=new THREE.Mesh(new THREE.BoxGeometry(BLOCK/2-4,0.4,0.4), blue);
+    chain.position.set(sx*(towerX+ (BLOCK/2-4)/2 -1), 8.5, 0); chain.rotation.z = -sx*0.28; g.add(chain);
+  }
+  g.position.set(x,0,z); scene.add(g);
+  landmarks.push({name:'Tower Bridge', x, z, r:44});
+}
+
+// Union Jack on a flagpole
+function makeUnionFlag(){
+  const g = new THREE.Group();
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08,0.08,7,8), new THREE.MeshStandardMaterial({color:0xdedede, metalness:0.6, roughness:0.4}));
+  pole.position.y=3.5; g.add(pole);
+  // flag canvas texture
+  const c=document.createElement('canvas'); c.width=60; c.height=36; const ctx=c.getContext('2d');
+  ctx.fillStyle='#012169'; ctx.fillRect(0,0,60,36);
+  ctx.strokeStyle='#fff'; ctx.lineWidth=8; ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(60,36); ctx.moveTo(60,0); ctx.lineTo(0,36); ctx.stroke();
+  ctx.strokeStyle='#C8102E'; ctx.lineWidth=3.5; ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(60,36); ctx.moveTo(60,0); ctx.lineTo(0,36); ctx.stroke();
+  ctx.fillStyle='#fff'; ctx.fillRect(0,13,60,10); ctx.fillRect(25,0,10,36);
+  ctx.fillStyle='#C8102E'; ctx.fillRect(0,15,60,6); ctx.fillRect(27,0,6,36);
+  const tex=new THREE.CanvasTexture(c);
+  const flag=new THREE.Mesh(new THREE.PlaneGeometry(3.2,1.9), new THREE.MeshStandardMaterial({map:tex, side:THREE.DoubleSide, roughness:0.9}));
+  flag.position.set(1.7,6.2,0); g.add(flag);
+  return g;
+}
+
+// London Underground roundel sign on a post
+function makeRoundel(){
+  const g = new THREE.Group();
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.12,0.12,4.6,8), new THREE.MeshStandardMaterial({color:0x30343a, metalness:0.4, roughness:0.6}));
+  pole.position.y=2.3; g.add(pole);
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(1.1,0.34,10,28), new THREE.MeshStandardMaterial({color:0xE1251B, roughness:0.5}));
+  ring.position.y=5; g.add(ring);
+  const bar = new THREE.Mesh(new THREE.BoxGeometry(3.0,0.7,0.15), new THREE.MeshStandardMaterial({color:0x10069F, roughness:0.5}));
+  bar.position.y=5; bar.position.z=0.02; g.add(bar);
+  return g;
+}
+
 landmarkPlan.forEach(l=>{
   const {x,z} = blockCenter(l.i,l.j);
   if(l.type==='bigben') addBigBen(x,z);
@@ -457,6 +610,7 @@ landmarkPlan.forEach(l=>{
   else if(l.type==='shard') addShard(x,z);
   else if(l.type==='gherkin') addGherkin(x,z);
   else if(l.type==='park') addPark(x,z);
+  else if(l.type==='towerbridge') addTowerBridge(x,z);
 });
 
 setLoad(0.65, 'Adding street furniture…');
@@ -498,13 +652,16 @@ for (const c of roadLines){
     let l4 = makeLampPost(); l4.position.set(c + ROAD/2 + 1.2, 0, d); l4.rotation.y=Math.PI/2; furnitureGroup.add(l4);
   }
 }
-// phone/post boxes & pavement trees at some intersections
+// phone/post boxes, tube roundels, flags & pavement trees at intersections
 for (const x of roadLines){
   for (const z of roadLines){
+    const px = x+ROAD/2+2, pz = z+ROAD/2+2;
     const r = rnd();
-    if (r<0.10){ const p=makePhoneBox(); p.position.set(x+ROAD/2+2, 0, z+ROAD/2+2); furnitureGroup.add(p);}
-    else if (r<0.18){ const p=makePostBox(); p.position.set(x+ROAD/2+2, 0, z+ROAD/2+2); furnitureGroup.add(p);}
-    else if (r<0.30){ const t=makeTree(x+ROAD/2+2.5, z+ROAD/2+2.5); furnitureGroup.add(t);}
+    if (r<0.10){ const p=makePhoneBox(); p.position.set(px,0,pz); furnitureGroup.add(p);}
+    else if (r<0.17){ const p=makePostBox(); p.position.set(px,0,pz); furnitureGroup.add(p);}
+    else if (r<0.24){ const p=makeRoundel(); p.position.set(px,0,pz); p.rotation.y=rnd()*6; furnitureGroup.add(p);}
+    else if (r<0.30){ const p=makeUnionFlag(); p.position.set(px,0,pz); p.rotation.y=rnd()*6; furnitureGroup.add(p);}
+    else if (r<0.42){ const t=makeTree(px+0.5, pz+0.5); furnitureGroup.add(t);}
   }
 }
 
@@ -515,7 +672,11 @@ setLoad(0.78, 'Building your cab…');
 // ============================================================
 function makeCar(bodyColor=0x0b0b0d, taxi=true){
   const car = new THREE.Group();
-  const paint = new THREE.MeshStandardMaterial({color:bodyColor, roughness:0.35, metalness:0.5});
+  const paint = new THREE.MeshStandardMaterial({color:bodyColor, roughness:0.28, metalness:0.45});
+  if(taxi){ // keep the player's cab bright & readable even in shadow
+    paint.emissive = new THREE.Color(bodyColor).multiplyScalar(0.4);
+    paint.emissiveIntensity = 0.5;
+  }
   const glass = new THREE.MeshStandardMaterial({color:0x223, roughness:0.1, metalness:0.3, transparent:true, opacity:0.7});
   // lower body
   const body = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.0, 4.6), paint); body.position.y=0.85; body.castShadow=true; car.add(body);
@@ -545,18 +706,24 @@ function makeCar(bodyColor=0x0b0b0d, taxi=true){
   const tlMat = new THREE.MeshStandardMaterial({color:0xff2222, emissive:0xff1111, emissiveIntensity:1.0});
   for(const sx of [-0.7,0.7]){ const h=new THREE.Mesh(new THREE.BoxGeometry(0.35,0.25,0.1), hlMat); h.position.set(sx,0.95,2.35); car.add(h);
     const t=new THREE.Mesh(new THREE.BoxGeometry(0.35,0.25,0.1), tlMat); t.position.set(sx,1.0,-2.35); car.add(t);}
-  // taxi sign
-  if(taxi){ const sign=new THREE.Mesh(new THREE.BoxGeometry(1.0,0.3,0.4), new THREE.MeshStandardMaterial({color:0xffcf33, emissive:0xffb800, emissiveIntensity:0.7})); sign.position.set(0,2.35,-0.2); car.add(sign);}
+  // white roof band + taxi sign so the player's cab always reads clearly
+  if(taxi){
+    const roof=new THREE.Mesh(new THREE.BoxGeometry(2.06,0.18,2.42), new THREE.MeshStandardMaterial({color:0xf3f5f7, roughness:0.5}));
+    roof.position.set(0,2.24,-0.2); car.add(roof);
+    const sign=new THREE.Mesh(new THREE.BoxGeometry(1.0,0.32,0.42), new THREE.MeshStandardMaterial({color:0xffd23f, emissive:0xffb800, emissiveIntensity:0.9}));
+    sign.position.set(0,2.5,-0.2); car.add(sign);
+  }
   return { car, wheels };
 }
 
-const { car: player, wheels: playerWheels } = makeCar(0x0b0b0d, true);
+// Player drives a bright pillar-box-red London cab so it never blends with tarmac
+const { car: player, wheels: playerWheels } = makeCar(0xe23b2e, true);
 player.position.set(CELL*0.5 + ROAD/4, 0, HALF - CELL*1.5); // start in a lane, facing into the city
 scene.add(player);
 
-// headlight spotlights
-const headlight = new THREE.SpotLight(0xfff2d0, 0, 60, Math.PI/5, 0.4, 1.2);
-headlight.position.set(0,1,2); player.add(headlight); player.add(headlight.target); headlight.target.position.set(0,0,10);
+// headlight spotlights (subtle by day, adds a lit-front glow)
+const headlight = new THREE.SpotLight(0xfff2d0, 3.0, 55, Math.PI/5, 0.45, 1.2);
+headlight.position.set(0,1,2); player.add(headlight); player.add(headlight.target); headlight.target.position.set(0,0,12);
 
 setLoad(0.9, 'Waking the traffic…');
 
@@ -655,6 +822,8 @@ function bindTouch(id, prop){
   el.addEventListener('mousedown',on); el.addEventListener('mouseup',off); el.addEventListener('mouseleave',off);
 }
 bindTouch('t-gas','gas'); bindTouch('t-brake','brake'); bindTouch('t-left','left'); bindTouch('t-right','right');
+// allow ?touch=1 to force the on-screen controls (handy for testing on desktop)
+if (/[?&]touch=1/.test(location.search)) document.getElementById('touch').classList.add('force');
 
 // ---------- audio (horn) via WebAudio ----------
 let actx;
