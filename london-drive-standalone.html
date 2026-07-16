@@ -33,9 +33,13 @@
   #help kbd { background: rgba(255,255,255,.14); border-radius: 4px; padding: 1px 6px; font-family: inherit; font-weight:700; font-size:11px;}
   #help .t { font-weight: 700; letter-spacing: 1px; opacity:.7; font-size: 11px; margin-bottom: 6px; text-transform: uppercase;}
 
-  /* Minimap */
-  #minimap { right: 20px; top: 20px; width: 190px; height: 190px; padding: 8px; }
-  #minimap canvas { width: 100%; height: 100%; border-radius: 8px; }
+  /* Minimap — small by default, tap/click to expand */
+  #minimap { right: 20px; top: 20px; width: 96px; height: 96px; padding: 6px;
+    pointer-events: auto; cursor: pointer; transition: width .28s cubic-bezier(.2,.8,.2,1), height .28s cubic-bezier(.2,.8,.2,1), padding .28s; }
+  #minimap.big { width: 260px; height: 260px; padding: 9px; }
+  #minimap canvas { width: 100%; height: 100%; border-radius: 8px; display: block; }
+  #minimap .mm-tag { position: absolute; left: 0; right: 0; bottom: -17px; text-align: center;
+    font-size: 9.5px; letter-spacing: 1.5px; opacity: .55; text-transform: uppercase; pointer-events: none; }
 
   /* Loading */
   #load { position: fixed; inset: 0; background: #0b0e14; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 50; transition: opacity .8s; }
@@ -80,7 +84,7 @@
 
 <div id="hud">
   <div id="compass" class="panel"><b id="dir">N</b> <span id="coords" style="opacity:.6"></span></div>
-  <div id="minimap" class="panel"><canvas id="mm" width="360" height="360"></canvas></div>
+  <div id="minimap" class="panel"><canvas id="mm" width="360" height="360"></canvas><div class="mm-tag" id="mmTag">tap to expand</div></div>
   <div id="place" class="panel"></div>
   <div id="speedo" class="panel">
     <div class="val" id="spd">0</div><div class="unit">MPH</div>
@@ -202,6 +206,10 @@ for (let i = -Math.ceil(GRID/2)-1; i <= Math.ceil(GRID/2); i++){
   const c = (i + 0.5) * CELL;
   if (c >= -HALF-1 && c <= HALF+1) roadLines.push(c);
 }
+// A small deterministic PRNG so the city is stable each load
+let seed = 1337;
+function rnd(){ seed = (seed*1664525 + 1013904223) & 0xffffffff; return ((seed>>>0)/4294967296); }
+
 function nearestRoadCenter(v){ return (Math.round(v/CELL - 0.5) + 0.5) * CELL; }
 function onRoad(x, z){
   const dx = Math.abs(x - nearestRoadCenter(x));
@@ -221,41 +229,84 @@ function onRoad(x, z){
 }
 
 // ---------- Roads (asphalt) with lane markings ----------
-const roadMat = new THREE.MeshStandardMaterial({ color: 0x3a3f47, roughness: 0.95 }); // lighter London tarmac
+// Two kinds of street so the map doesn't feel uniform:
+//  · main avenues  — darker/busier tarmac, a crisp white centre line
+//  · side streets  — lighter tarmac, no centre line, double-yellow kerb lines
+const mainMat = new THREE.MeshStandardMaterial({ color: 0x34393f, roughness: 0.96 });
+const sideMat = new THREE.MeshStandardMaterial({ color: 0x444a52, roughness: 0.98 });
 const lineMat = new THREE.MeshStandardMaterial({ color: 0xe9edf0, roughness: 0.5 });    // UK white lines
+const yellowMat= new THREE.MeshStandardMaterial({ color: 0xE7B93A, roughness: 0.6 });    // double-yellow (no parking)
 const pavementMat = new THREE.MeshStandardMaterial({ color: 0x9aa0a8, roughness: 1 });
+
+// every third grid line is a "main" avenue
+const mainRoads = new Set(roadLines.filter((_,i)=> i%3===0));
+const isMain = c => mainRoads.has(c);
 
 const roadGroup = new THREE.Group(); scene.add(roadGroup);
 const roadSpan = 2*HALF + ROAD;
-for (const c of roadLines){
-  // horizontal road (runs along X) at z = c
-  const hz = new THREE.Mesh(new THREE.PlaneGeometry(roadSpan, ROAD), roadMat);
-  hz.rotation.x = -Math.PI/2; hz.position.set(0, roadY, c); hz.receiveShadow = true; roadGroup.add(hz);
-  // vertical road (runs along Z) at x = c
-  const vt = new THREE.Mesh(new THREE.PlaneGeometry(ROAD, roadSpan), roadMat);
-  vt.rotation.x = -Math.PI/2; vt.position.set(c, roadY, 0); vt.receiveShadow = true; roadGroup.add(vt);
+const dashGeo = new THREE.PlaneGeometry(0.5, 4);
+const flatXZ = -Math.PI/2;
+
+function addFlat(geo, mat, x, z, rotY){
+  const m = new THREE.Mesh(geo, mat);
+  m.rotation.x = flatXZ; if(rotY) m.rotation.z = rotY;
+  m.position.set(x, roadY+0.012, z); roadGroup.add(m); return m;
 }
-// dashed centre lines (instanced dashes)
-{
-  const dashGeo = new THREE.PlaneGeometry(0.5, 4);
-  const dashes = [];
-  for (const c of roadLines){
-    for (let d=-HALF; d<=HALF; d+=10){
-      dashes.push([d, c, false]); // dash on horizontal road (oriented along X)
-      dashes.push([c, d, true]);  // dash on vertical road (oriented along Z)
+
+for (const c of roadLines){
+  const main = isMain(c);
+  const mat = main ? mainMat : sideMat;
+  // horizontal road (runs along X) at z = c
+  const hz = new THREE.Mesh(new THREE.PlaneGeometry(roadSpan, ROAD), mat);
+  hz.rotation.x = flatXZ; hz.position.set(0, roadY, c); hz.receiveShadow = true; roadGroup.add(hz);
+  // vertical road (runs along Z) at x = c
+  const vt = new THREE.Mesh(new THREE.PlaneGeometry(ROAD, roadSpan), mat);
+  vt.rotation.x = flatXZ; vt.position.set(c, roadY, 0); vt.receiveShadow = true; roadGroup.add(vt);
+
+  if (main){
+    // solid continuous white centre line, both directions
+    addFlat(new THREE.PlaneGeometry(roadSpan, 0.5), lineMat, 0, c, 0);
+    addFlat(new THREE.PlaneGeometry(0.5, roadSpan), lineMat, c, 0, 0);
+  } else {
+    // double-yellow lines just inside each kerb, both directions
+    for (const off of [-1, 1]){
+      const e = off*(ROAD/2 - 1.1);
+      addFlat(new THREE.PlaneGeometry(roadSpan, 0.28), yellowMat, 0, c+e, 0);
+      addFlat(new THREE.PlaneGeometry(roadSpan, 0.28), yellowMat, 0, c+e+off*0.5, 0);
+      addFlat(new THREE.PlaneGeometry(0.28, roadSpan), yellowMat, c+e, 0, 0);
+      addFlat(new THREE.PlaneGeometry(0.28, roadSpan), yellowMat, c+e+off*0.5, 0, 0);
     }
   }
-  const inst = new THREE.InstancedMesh(dashGeo, lineMat, dashes.length);
-  const m4 = new THREE.Matrix4(); const q = new THREE.Quaternion();
-  dashes.forEach((d,idx)=>{
-    const [a,b,vert] = d;
-    q.setFromEuler(new THREE.Euler(-Math.PI/2, 0, vert?Math.PI/2:0));
-    m4.compose(new THREE.Vector3(a, roadY+0.01, b), q, new THREE.Vector3(1,1,1));
-    inst.setMatrixAt(idx, m4);
-  });
-  inst.instanceMatrix.needsUpdate = true;
-  roadGroup.add(inst);
 }
+
+// Zebra crossings + Belisha beacons where two main avenues meet
+function belisha(x, z){
+  const g = new THREE.Group();
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.12,0.12,4.2,8),
+    new THREE.MeshStandardMaterial({color:0x222, roughness:0.6}));
+  pole.position.y=2.1; g.add(pole);
+  const globe = new THREE.Mesh(new THREE.SphereGeometry(0.5,14,12),
+    new THREE.MeshStandardMaterial({color:0xff8a00, emissive:0xff7a00, emissiveIntensity:1.1}));
+  globe.position.y=4.5; g.add(globe);
+  g.position.set(x,0,z); roadGroup.add(g);
+}
+function addZebra(cx, cz){
+  // white stripes across each of the four approaches
+  const stripeGeo = new THREE.PlaneGeometry(1.1, ROAD-2);
+  for (let s=-3; s<=3; s++){
+    addFlat(stripeGeo, lineMat, cx + s*1.9, cz - ROAD/2 - 3.2, 0); // north approach (along X)
+    addFlat(stripeGeo, lineMat, cx + s*1.9, cz + ROAD/2 + 3.2, 0); // south
+    addFlat(stripeGeo, lineMat, cx - ROAD/2 - 3.2, cz + s*1.9, Math.PI/2); // west (along Z)
+    addFlat(stripeGeo, lineMat, cx + ROAD/2 + 3.2, cz + s*1.9, Math.PI/2); // east
+  }
+  belisha(cx - ROAD/2 - 2, cz - ROAD/2 - 2);
+  belisha(cx + ROAD/2 + 2, cz + ROAD/2 + 2);
+}
+for (const x of mainRoads){ for (const z of mainRoads){
+  if (rnd() < 0.5) addZebra(x, z);
+}}
+
+setLoad(0.22, 'Painting the roads…');
 
 setLoad(0.25, 'Raising the buildings…');
 
@@ -331,10 +382,6 @@ function addPitchedRoof(parent, bx, bz, w, d, baseY, col){
   ch.position.set(bx + (rnd()-0.5)*w*0.5, baseY+1.2, bz + (rnd()<0.5?-1:1)*hd*0.5);
   ch.castShadow=true; parent.add(ch);
 }
-
-// A small deterministic PRNG so the city is stable each load
-let seed = 1337;
-function rnd(){ seed = (seed*1664525 + 1013904223) & 0xffffffff; return ((seed>>>0)/4294967296); }
 
 // reserved cells for landmarks (grid coordinates i,j from -(GRID-1)/2 .. )
 const reserved = new Set();
@@ -668,60 +715,86 @@ setLoad(0.78, 'Building your cab…');
 // ============================================================
 //  VEHICLE — the player's London black cab
 // ============================================================
-function makeCar(bodyColor=0x0b0b0d, taxi=true){
+// Front of the car is local -Z (direction of travel). The chase camera sits
+// behind at +Z, so the REAR (boot, tail-light bar, yellow plate) faces it.
+function makeCar(bodyColor=0x0b0b0d, taxi=false, detailed=false){
   const car = new THREE.Group();
-  const paint = new THREE.MeshStandardMaterial({color:bodyColor, roughness:0.28, metalness:0.45});
-  if(taxi){ // keep the player's cab bright & readable even in shadow
-    paint.emissive = new THREE.Color(bodyColor).multiplyScalar(0.4);
-    paint.emissiveIntensity = 0.5;
+  const paint = new THREE.MeshStandardMaterial({color:bodyColor, roughness:0.26, metalness:0.5});
+  if(taxi){ paint.emissive = new THREE.Color(bodyColor).multiplyScalar(0.4); paint.emissiveIntensity = 0.5; }
+  const glass = new THREE.MeshStandardMaterial({color:0x121a24, roughness:0.08, metalness:0.4, transparent:true, opacity:0.65});
+  const trim  = new THREE.MeshStandardMaterial({color:0x14171b, roughness:0.6, metalness:0.4});
+  const chrome= new THREE.MeshStandardMaterial({color:0xcfd4d9, metalness:0.9, roughness:0.25});
+  const hlMat = new THREE.MeshStandardMaterial({color:0xffffff, emissive:0xfff2c0, emissiveIntensity:1.5});
+  const tlMat = new THREE.MeshStandardMaterial({color:0xff2a22, emissive:0xff1710, emissiveIntensity:1.3});
+  const box=(w,h,d,mat)=>{ const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d), mat); m.castShadow=true; return m; };
+  const add=(m,x,y,z,rx)=>{ m.position.set(x,y,z); if(rx) m.rotation.x=rx; car.add(m); return m; };
+
+  // main body + lower sills / wheel-arch band
+  add(box(2.14,0.86,4.5,paint), 0,0.9,0);
+  add(box(2.24,0.42,4.2,trim), 0,0.5,0);
+  // bonnet (front, -Z) and boot deck (rear, +Z) — different lengths so ends differ
+  add(box(2.0,0.4,1.5,paint), 0,1.2,-1.45);
+  add(box(2.0,0.44,1.0,paint), 0,1.24,1.7);
+  // cabin greenhouse
+  add(box(1.96,0.86,2.5,paint), 0,1.72,0.15);
+
+  if(detailed){
+    // raked wind-screens
+    add(box(1.86,0.82,0.08,glass), 0,1.68,-1.02, -0.5);
+    add(box(1.86,0.78,0.08,glass), 0,1.68, 1.28,  0.5);
+    // side glass
+    const sl=box(0.08,0.62,2.2,glass); add(sl,0.99,1.78,0.15); const sr=sl.clone(); add(sr,-0.99,1.78,0.15);
+    // door line + handles
+    add(box(2.16,0.02,2.6,trim), 0,1.28,0.1);
+    // front: grille + bumper + splitter
+    add(box(1.5,0.38,0.1,trim), 0,1.02,-2.28);
+    add(box(2.16,0.34,0.42,trim), 0,0.66,-2.32);
+    add(box(1.2,0.12,0.2,chrome), 0,1.18,-2.3);          // chrome strip
+    // rear: full-width tail-light bar + boot handle + bumper + exhaust
+    add(box(2.02,0.3,0.12,tlMat), 0,1.06,2.32);          // wraparound red bar
+    add(box(0.8,0.06,0.06,chrome), 0,1.3,2.28);          // boot chrome
+    add(box(2.16,0.34,0.42,trim), 0,0.66,2.34);          // rear bumper
+    const exh=new THREE.Mesh(new THREE.CylinderGeometry(0.09,0.09,0.3,8),chrome); exh.rotation.x=Math.PI/2; add(exh,-0.6,0.5,2.5);
+    // wing mirrors
+    add(box(0.34,0.2,0.16,paint), 1.16,1.6,-0.7); add(box(0.34,0.2,0.16,paint),-1.16,1.6,-0.7);
+    // UK number plates: white front, yellow rear (also flags which end is the rear)
+    add(box(0.86,0.26,0.05,new THREE.MeshStandardMaterial({color:0xf2f2f2, roughness:0.5})), 0,0.66,-2.36);
+    add(box(0.86,0.26,0.05,new THREE.MeshStandardMaterial({color:0xf6d21f, roughness:0.5})), 0,0.66,2.38);
   }
-  const glass = new THREE.MeshStandardMaterial({color:0x223, roughness:0.1, metalness:0.3, transparent:true, opacity:0.7});
-  // lower body
-  const body = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.0, 4.6), paint); body.position.y=0.85; body.castShadow=true; car.add(body);
-  // hood/bonnet slope (front)
-  const bonnet = new THREE.Mesh(new THREE.BoxGeometry(2.15, 0.5, 1.3), paint); bonnet.position.set(0,1.15,1.7); bonnet.castShadow=true; car.add(bonnet);
-  // cabin
-  const cabin = new THREE.Mesh(new THREE.BoxGeometry(2.05, 0.95, 2.4), paint); cabin.position.set(0,1.75,-0.2); cabin.castShadow=true; car.add(cabin);
-  // windows
-  const wf = new THREE.Mesh(new THREE.BoxGeometry(1.9,0.7,0.1), glass); wf.position.set(0,1.8,1.0); car.add(wf);
-  const wb = new THREE.Mesh(new THREE.BoxGeometry(1.9,0.7,0.1), glass); wb.position.set(0,1.8,-1.4); car.add(wb);
-  const wl = new THREE.Mesh(new THREE.BoxGeometry(0.1,0.7,2.2), glass); wl.position.set(1.0,1.8,-0.2); car.add(wl);
-  const wr = wl.clone(); wr.position.x=-1.0; car.add(wr);
-  // wheels
-  const wheelGeo = new THREE.CylinderGeometry(0.55,0.55,0.4,16);
-  const wheelMat = new THREE.MeshStandardMaterial({color:0x0a0a0a, roughness:0.9});
-  const hubMat = new THREE.MeshStandardMaterial({color:0xbfc4c9, metalness:0.7, roughness:0.3});
+  // headlights (front) + tail lights (rear)
+  for(const sx of [-0.72,0.72]){
+    add(box(0.46,0.26,0.12,hlMat), sx,1.0,-2.28);
+    if(!detailed) add(box(0.4,0.28,0.12,tlMat), sx,1.05,2.3);
+  }
+
+  // wheels — front pair first (so steering visual uses indices 0,1); front at -Z
+  const wheelGeo = new THREE.CylinderGeometry(0.56,0.56,0.42,18);
+  const wheelMat = new THREE.MeshStandardMaterial({color:0x0b0b0b, roughness:0.9});
+  const hubMat = chrome;
   const wheels=[];
-  const wpos = [[1.05,0.55,1.5],[-1.05,0.55,1.5],[1.05,0.55,-1.5],[-1.05,0.55,-1.5]];
-  wpos.forEach(p=>{
+  [[1.04,0.56,-1.5],[-1.04,0.56,-1.5],[1.04,0.56,1.5],[-1.04,0.56,1.5]].forEach(p=>{
     const w=new THREE.Group();
     const tire=new THREE.Mesh(wheelGeo, wheelMat); tire.rotation.z=Math.PI/2; tire.castShadow=true; w.add(tire);
-    const hub=new THREE.Mesh(new THREE.CylinderGeometry(0.22,0.22,0.42,8), hubMat); hub.rotation.z=Math.PI/2; w.add(hub);
+    const hub=new THREE.Mesh(new THREE.CylinderGeometry(0.24,0.24,0.44,6), hubMat); hub.rotation.z=Math.PI/2; w.add(hub);
     w.position.set(...p); car.add(w); wheels.push(w);
   });
-  // headlights + tail lights
-  const hlMat = new THREE.MeshStandardMaterial({color:0xffffff, emissive:0xfff2c0, emissiveIntensity:1.4});
-  const tlMat = new THREE.MeshStandardMaterial({color:0xff2222, emissive:0xff1111, emissiveIntensity:1.0});
-  for(const sx of [-0.7,0.7]){ const h=new THREE.Mesh(new THREE.BoxGeometry(0.35,0.25,0.1), hlMat); h.position.set(sx,0.95,2.35); car.add(h);
-    const t=new THREE.Mesh(new THREE.BoxGeometry(0.35,0.25,0.1), tlMat); t.position.set(sx,1.0,-2.35); car.add(t);}
-  // white roof band + taxi sign so the player's cab always reads clearly
+
+  // white roof band + taxi light for the player's cab
   if(taxi){
-    const roof=new THREE.Mesh(new THREE.BoxGeometry(2.06,0.18,2.42), new THREE.MeshStandardMaterial({color:0xf3f5f7, roughness:0.5}));
-    roof.position.set(0,2.24,-0.2); car.add(roof);
-    const sign=new THREE.Mesh(new THREE.BoxGeometry(1.0,0.32,0.42), new THREE.MeshStandardMaterial({color:0xffd23f, emissive:0xffb800, emissiveIntensity:0.9}));
-    sign.position.set(0,2.5,-0.2); car.add(sign);
+    add(box(1.98,0.16,2.5,new THREE.MeshStandardMaterial({color:0xf3f5f7, roughness:0.5})), 0,2.2,0.15);
+    add(box(0.95,0.3,0.4,new THREE.MeshStandardMaterial({color:0xffd23f, emissive:0xffb800, emissiveIntensity:0.9})), 0,2.44,0.15);
   }
   return { car, wheels };
 }
 
 // Player drives a bright pillar-box-red London cab so it never blends with tarmac
-const { car: player, wheels: playerWheels } = makeCar(0xe23b2e, true);
+const { car: player, wheels: playerWheels } = makeCar(0xe23b2e, true, true);
 player.position.set(CELL*0.5 + ROAD/4, 0, HALF - CELL*1.5); // start in a lane, facing into the city
 scene.add(player);
 
 // headlight spotlights (subtle by day, adds a lit-front glow)
 const headlight = new THREE.SpotLight(0xfff2d0, 3.0, 55, Math.PI/5, 0.45, 1.2);
-headlight.position.set(0,1,2); player.add(headlight); player.add(headlight.target); headlight.target.position.set(0,0,12);
+headlight.position.set(0,1,-2); player.add(headlight); player.add(headlight.target); headlight.target.position.set(0,0,-12);
 
 setLoad(0.9, 'Waking the traffic…');
 
@@ -766,12 +839,13 @@ function updateAgent(a, dt, init){
   a.pos += a.dir * a.speed * dt;
   if (a.pos > HALF+20) a.pos = -HALF-20;
   if (a.pos < -HALF-20) a.pos = HALF+20;
+  // vehicle front is local -Z, so headings are offset accordingly
   if (a.horizontal){
     a.mesh.position.set(a.pos, 0, a.line + a.laneOff);
-    a.mesh.rotation.y = a.dir>0 ? Math.PI/2 : -Math.PI/2;
+    a.mesh.rotation.y = a.dir>0 ? -Math.PI/2 : Math.PI/2;
   } else {
     a.mesh.position.set(a.line + a.laneOff, 0, a.pos);
-    a.mesh.rotation.y = a.dir>0 ? 0 : Math.PI;
+    a.mesh.rotation.y = a.dir>0 ? Math.PI : 0;
   }
 }
 for(let k=0;k<26;k++) spawnAgent(false);
@@ -913,18 +987,27 @@ function showPlace(txt){ placeEl.textContent=txt; placeEl.classList.add('show');
 const compassDirs=['N','NE','E','SE','S','SW','W','NW'];
 let lastLandmark=null;
 
-// minimap
+// minimap — tap/click to expand or shrink
+const mmEl=document.getElementById('minimap'), mmTag=document.getElementById('mmTag');
+mmEl.addEventListener('click', ()=>{
+  const big = mmEl.classList.toggle('big');
+  mmTag.textContent = big ? 'tap to shrink' : 'tap to expand';
+});
 const mm=document.getElementById('mm'), mmx=mm.getContext('2d');
 function drawMinimap(){
+  const big = mmEl.classList.contains('big');
   const W=mm.width, H=mm.height, R=W/2;
   mmx.clearRect(0,0,W,H);
   mmx.fillStyle='#20242c'; mmx.fillRect(0,0,W,H);
-  const scale = W / ((GRID+2)*CELL);
+  // zoom in a little when collapsed so it stays readable
+  const scale = W / ((big ? GRID+2 : GRID*0.55) * CELL);
   const cx=W/2, cy=H/2;
   const toMap=(x,z)=>[cx + (x-player.position.x)*scale, cy + (z-player.position.z)*scale];
-  // roads
-  mmx.strokeStyle='#3a4150'; mmx.lineWidth=Math.max(2,ROAD*scale);
+  // roads — main avenues drawn brighter/thicker than side streets
   for(const c of roadLines){
+    const main = isMain(c);
+    mmx.strokeStyle = main ? '#525c6b' : '#394050';
+    mmx.lineWidth = Math.max(1.5, (main?ROAD*1.15:ROAD*0.75)*scale);
     let [ax,ay]=toMap(-HALF,c),[bx,by]=toMap(HALF,c); mmx.beginPath();mmx.moveTo(ax,ay);mmx.lineTo(bx,by);mmx.stroke();
     let [cx1,cy1]=toMap(c,-HALF),[dx,dy]=toMap(c,HALF); mmx.beginPath();mmx.moveTo(cx1,cy1);mmx.lineTo(dx,dy);mmx.stroke();
   }
