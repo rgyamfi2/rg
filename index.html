@@ -1,0 +1,886 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>London Drive — Free Roam</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%9A%95%3C/text%3E%3C/svg%3E" />
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #0b0e14; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  #app { position: fixed; inset: 0; }
+  canvas { display: block; }
+
+  /* HUD */
+  #hud { position: fixed; inset: 0; pointer-events: none; color: #fff; }
+  .panel {
+    position: absolute; background: rgba(12,16,24,0.55);
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,0.12); border-radius: 14px;
+  }
+  #speedo { right: 20px; bottom: 20px; width: 168px; height: 96px; padding: 12px 16px; text-align: right; }
+  #speedo .val { font-size: 46px; font-weight: 800; line-height: 1; letter-spacing: -1px; }
+  #speedo .unit { font-size: 13px; opacity: .7; letter-spacing: 2px; }
+  #speedo .gear { position:absolute; left:16px; bottom:14px; font-size:13px; opacity:.65; letter-spacing:1px;}
+
+  #compass { left: 20px; top: 20px; padding: 10px 16px; font-size: 14px; letter-spacing: 1px; }
+  #compass b { font-size: 20px; }
+
+  #place { left: 50%; top: 22px; transform: translateX(-50%); padding: 9px 22px; font-size: 15px; letter-spacing: .5px; opacity: 0; transition: opacity .4s; text-align:center;}
+  #place.show { opacity: 1; }
+
+  #help { left: 20px; bottom: 20px; padding: 12px 16px; font-size: 12.5px; line-height: 1.7; opacity: .9; max-width: 240px;}
+  #help kbd { background: rgba(255,255,255,.14); border-radius: 4px; padding: 1px 6px; font-family: inherit; font-weight:700; font-size:11px;}
+  #help .t { font-weight: 700; letter-spacing: 1px; opacity:.7; font-size: 11px; margin-bottom: 6px; text-transform: uppercase;}
+
+  /* Minimap */
+  #minimap { right: 20px; top: 20px; width: 190px; height: 190px; padding: 8px; }
+  #minimap canvas { width: 100%; height: 100%; border-radius: 8px; }
+
+  /* Loading */
+  #load { position: fixed; inset: 0; background: #0b0e14; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 50; transition: opacity .8s; }
+  #load h1 { color: #fff; font-size: 40px; font-weight: 800; letter-spacing: -1px; margin-bottom: 4px; }
+  #load h1 span { color: #e63946; }
+  #load p { color: #8a94a6; font-size: 14px; letter-spacing: 3px; text-transform: uppercase; margin-bottom: 26px;}
+  #load .bar { width: 240px; height: 4px; background: rgba(255,255,255,.1); border-radius: 4px; overflow: hidden;}
+  #load .fill { height: 100%; width: 30%; background: linear-gradient(90deg,#e63946,#ffd166); border-radius:4px; transition: width .3s;}
+  #load small { color:#5a6474; margin-top:20px; font-size:12px;}
+
+  /* Mobile controls */
+  #touch { position: fixed; inset: 0; pointer-events: none; display: none; z-index: 20;}
+  .tbtn { position: absolute; pointer-events: auto; width: 78px; height: 78px; border-radius: 50%;
+    background: rgba(255,255,255,.10); border: 1.5px solid rgba(255,255,255,.28); color: #fff;
+    font-size: 30px; display: flex; align-items: center; justify-content: center; user-select: none; -webkit-user-select:none; -webkit-tap-highlight-color: transparent;}
+  .tbtn:active { background: rgba(255,255,255,.28); }
+  #t-gas { right: 26px; bottom: 120px; }
+  #t-brake { right: 118px; bottom: 44px; }
+  #t-left { left: 26px; bottom: 60px; }
+  #t-right { left: 122px; bottom: 60px; }
+  @media (hover: none) and (pointer: coarse) { #touch { display: block; } #help{display:none;} }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<div id="hud">
+  <div id="compass" class="panel"><b id="dir">N</b> <span id="coords" style="opacity:.6"></span></div>
+  <div id="minimap" class="panel"><canvas id="mm" width="360" height="360"></canvas></div>
+  <div id="place" class="panel"></div>
+  <div id="speedo" class="panel">
+    <div class="val" id="spd">0</div><div class="unit">MPH</div>
+    <div class="gear" id="gear">D</div>
+  </div>
+  <div id="help" class="panel">
+    <div class="t">London Drive</div>
+    <div><kbd>W</kbd>/<kbd>↑</kbd> accelerate &nbsp; <kbd>S</kbd>/<kbd>↓</kbd> brake/reverse</div>
+    <div><kbd>A</kbd><kbd>D</kbd>/<kbd>←</kbd><kbd>→</kbd> steer &nbsp; <kbd>Space</kbd> handbrake</div>
+    <div><kbd>C</kbd> camera &nbsp; <kbd>H</kbd> horn &nbsp; <kbd>R</kbd> reset</div>
+  </div>
+</div>
+
+<div id="touch">
+  <div class="tbtn" id="t-left">◀</div>
+  <div class="tbtn" id="t-right">▶</div>
+  <div class="tbtn" id="t-gas">▲</div>
+  <div class="tbtn" id="t-brake">■</div>
+</div>
+
+<div id="load">
+  <h1>LONDON <span>DRIVE</span></h1>
+  <p>Free Roam</p>
+  <div class="bar"><div class="fill" id="fill"></div></div>
+  <small id="lmsg">Building the city…</small>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three.module.js"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+
+/* ============================================================
+   LONDON DRIVE — a free-roam driving game in a stylised London
+   Single-file Three.js scene. Arcade handling, dynamic camera,
+   landmarks, traffic, pedestrians, minimap, day sky.
+   ============================================================ */
+
+const loadEl = document.getElementById('load');
+const fillEl = document.getElementById('fill');
+const lmsg   = document.getElementById('lmsg');
+const setLoad = (p, m) => { fillEl.style.width = Math.min(100,p*100)+'%'; if(m) lmsg.textContent = m; };
+
+// ---------- Renderer ----------
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+document.getElementById('app').appendChild(renderer.domElement);
+
+// ---------- Scene / sky / fog ----------
+const scene = new THREE.Scene();
+const skyTop = new THREE.Color(0x6ea8dc), skyBot = new THREE.Color(0xcfe0ec);
+scene.background = skyBot.clone();
+scene.fog = new THREE.Fog(0xbfd2e0, 120, 620);
+
+// Gradient sky dome
+{
+  const g = new THREE.SphereGeometry(1000, 32, 16);
+  const m = new THREE.ShaderMaterial({
+    side: THREE.BackSide, depthWrite: false,
+    uniforms: { top:{value:skyTop}, bot:{value:skyBot} },
+    vertexShader: `varying vec3 vP; void main(){ vP = position; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
+    fragmentShader: `varying vec3 vP; uniform vec3 top; uniform vec3 bot;
+      void main(){ float h = normalize(vP).y*0.5+0.5; gl_FragColor = vec4(mix(bot,top,pow(h,0.8)),1.0);}`
+  });
+  scene.add(new THREE.Mesh(g, m));
+}
+
+// ---------- Camera ----------
+const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.5, 2000);
+camera.position.set(0, 12, 22);
+
+// ---------- Lights ----------
+const hemi = new THREE.HemisphereLight(0xbfd6ff, 0x505a52, 0.85);
+scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xfff2d6, 2.1);
+sun.position.set(120, 180, 80);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.near = 10; sun.shadow.camera.far = 600;
+const S = 260;
+sun.shadow.camera.left=-S; sun.shadow.camera.right=S; sun.shadow.camera.top=S; sun.shadow.camera.bottom=-S;
+sun.shadow.bias = -0.0004;
+sun.shadow.normalBias = 0.5;
+scene.add(sun);
+scene.add(sun.target);
+
+setLoad(0.1, 'Laying the streets…');
+
+// ============================================================
+//  WORLD LAYOUT
+//  A grid of blocks. Roads run along a grid; buildings fill blocks.
+//  BLOCK = building footprint size, ROAD = street width.
+// ============================================================
+const BLOCK = 44;
+const ROAD  = 16;
+const CELL  = BLOCK + ROAD;         // one grid cell
+const GRID  = 9;                    // GRID x GRID blocks (odd = centered)
+const HALF  = (GRID*CELL)/2;
+const roadY = 0.02;
+
+// Block centres sit at i*CELL (i = -4..4). Roads run BETWEEN blocks,
+// at the half-cell offsets (i+0.5)*CELL, so they never overlap buildings.
+const roadLines = [];
+for (let i = -Math.ceil(GRID/2)-1; i <= Math.ceil(GRID/2); i++){
+  const c = (i + 0.5) * CELL;
+  if (c >= -HALF-1 && c <= HALF+1) roadLines.push(c);
+}
+function nearestRoadCenter(v){ return (Math.round(v/CELL - 0.5) + 0.5) * CELL; }
+function onRoad(x, z){
+  const dx = Math.abs(x - nearestRoadCenter(x));
+  const dz = Math.abs(z - nearestRoadCenter(z));
+  return dx < ROAD/2 + 0.5 || dz < ROAD/2 + 0.5;
+}
+
+// ---------- Ground ----------
+{
+  const g = new THREE.PlaneGeometry(GRID*CELL+400, GRID*CELL+400);
+  const m = new THREE.MeshStandardMaterial({ color: 0x3f4a3a, roughness: 1 });
+  const ground = new THREE.Mesh(g, m);
+  ground.rotation.x = -Math.PI/2;
+  ground.position.y = -0.02;
+  ground.receiveShadow = true;
+  scene.add(ground);
+}
+
+// ---------- Roads (asphalt) with lane markings ----------
+const roadMat = new THREE.MeshStandardMaterial({ color: 0x2b2e33, roughness: 0.95 });
+const lineMat = new THREE.MeshStandardMaterial({ color: 0xf2e34a, roughness: 0.6 });
+const pavementMat = new THREE.MeshStandardMaterial({ color: 0x8d9099, roughness: 1 });
+
+const roadGroup = new THREE.Group(); scene.add(roadGroup);
+const roadSpan = 2*HALF + ROAD;
+for (const c of roadLines){
+  // horizontal road (runs along X) at z = c
+  const hz = new THREE.Mesh(new THREE.PlaneGeometry(roadSpan, ROAD), roadMat);
+  hz.rotation.x = -Math.PI/2; hz.position.set(0, roadY, c); hz.receiveShadow = true; roadGroup.add(hz);
+  // vertical road (runs along Z) at x = c
+  const vt = new THREE.Mesh(new THREE.PlaneGeometry(ROAD, roadSpan), roadMat);
+  vt.rotation.x = -Math.PI/2; vt.position.set(c, roadY, 0); vt.receiveShadow = true; roadGroup.add(vt);
+}
+// dashed centre lines (instanced dashes)
+{
+  const dashGeo = new THREE.PlaneGeometry(0.5, 4);
+  const dashes = [];
+  for (const c of roadLines){
+    for (let d=-HALF; d<=HALF; d+=10){
+      dashes.push([d, c, false]); // dash on horizontal road (oriented along X)
+      dashes.push([c, d, true]);  // dash on vertical road (oriented along Z)
+    }
+  }
+  const inst = new THREE.InstancedMesh(dashGeo, lineMat, dashes.length);
+  const m4 = new THREE.Matrix4(); const q = new THREE.Quaternion();
+  dashes.forEach((d,idx)=>{
+    const [a,b,vert] = d;
+    q.setFromEuler(new THREE.Euler(-Math.PI/2, 0, vert?Math.PI/2:0));
+    m4.compose(new THREE.Vector3(a, roadY+0.01, b), q, new THREE.Vector3(1,1,1));
+    inst.setMatrixAt(idx, m4);
+  });
+  inst.instanceMatrix.needsUpdate = true;
+  roadGroup.add(inst);
+}
+
+setLoad(0.25, 'Raising the buildings…');
+
+// ---------- Buildings ----------
+// Reusable box geometry per height; use a palette of London-ish facades.
+const facadeColors = [0x9b7a5a, 0xb08d6a, 0x7d6f63, 0xa8a29a, 0xc4b7a6, 0x8a5a44, 0x6f7d86, 0xd9cdb8];
+const roofColor = 0x40444b;
+const winMat = new THREE.MeshStandardMaterial({ color: 0x1b2430, roughness: 0.3, metalness: 0.2, emissive: 0x0a1622, emissiveIntensity: 0.6 });
+
+const buildingGeoCache = {};
+function boxGeo(w,h,d){ const k=w+'_'+h+'_'+d; return buildingGeoCache[k] || (buildingGeoCache[k]=new THREE.BoxGeometry(w,h,d)); }
+
+const buildingGroup = new THREE.Group(); scene.add(buildingGroup);
+const colliders = []; // {x,z,hw,hd} axis-aligned building boxes for collision
+
+// window texture (procedural canvas) — gives buildings a glassy facade look
+function makeFacadeTexture(color){
+  const c = document.createElement('canvas'); c.width=64; c.height=128;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#'+new THREE.Color(color).getHexString(); ctx.fillRect(0,0,64,128);
+  ctx.fillStyle = 'rgba(20,30,42,0.9)';
+  for(let y=8;y<128;y+=16){ for(let x=8;x<64;x+=16){ ctx.fillRect(x,y,9,10);} }
+  // slight window glow variation
+  for(let y=8;y<128;y+=16){ for(let x=8;x<64;x+=16){ if(Math.random()<0.15){ctx.fillStyle='rgba(255,214,140,0.5)';ctx.fillRect(x,y,9,10);ctx.fillStyle='rgba(20,30,42,0.9)';}}}
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  return t;
+}
+const facadeTexCache = {};
+function facadeMat(color, w, h){
+  if(!facadeTexCache[color]) facadeTexCache[color] = makeFacadeTexture(color);
+  const t = facadeTexCache[color].clone(); t.needsUpdate = true;
+  t.repeat.set(Math.max(1,Math.round(w/6)), Math.max(1,Math.round(h/5)));
+  return new THREE.MeshStandardMaterial({ map: t, roughness: 0.8, metalness: 0.05 });
+}
+
+// A small deterministic PRNG so the city is stable each load
+let seed = 1337;
+function rnd(){ seed = (seed*1664525 + 1013904223) & 0xffffffff; return ((seed>>>0)/4294967296); }
+
+// reserved cells for landmarks (grid coordinates i,j from -(GRID-1)/2 .. )
+const reserved = new Set();
+function key(i,j){ return i+','+j; }
+
+// place landmarks first (choose a few blocks)
+const g0 = -(GRID-1)/2;
+const landmarkPlan = [
+  { i: g0+2, j: g0+2, type:'bigben' },
+  { i: g0+6, j: g0+3, type:'eye' },
+  { i: g0+4, j: g0+6, type:'stpauls' },
+  { i: g0+7, j: g0+7, type:'shard' },
+  { i: g0+1, j: g0+6, type:'gherkin' },
+  { i: g0+3, j: g0+4, type:'park' },
+];
+landmarkPlan.forEach(l=>reserved.add(key(l.i,l.j)));
+
+function blockCenter(i,j){ return { x: i*CELL, z: j*CELL }; }
+
+// fill ordinary blocks with clusters of buildings
+for (let i = g0; i <= (GRID-1)/2; i++){
+  for (let j = g0; j <= (GRID-1)/2; j++){
+    if (reserved.has(key(i,j))) continue;
+    const { x, z } = blockCenter(i,j);
+    // subdivide block into up to 2x2 buildings
+    const div = rnd() < 0.45 ? 2 : 1;
+    const sub = BLOCK / div;
+    for (let a=0;a<div;a++){
+      for (let b=0;b<div;b++){
+        if (div===2 && rnd()<0.12) continue; // occasional gap / courtyard
+        const pad = 2 + rnd()*2;
+        const w = sub - pad, d = sub - pad;
+        const h = 8 + Math.pow(rnd(),1.6)*46;
+        const bx = x - BLOCK/2 + sub*(a+0.5);
+        const bz = z - BLOCK/2 + sub*(b+0.5);
+        const col = facadeColors[(Math.random()*facadeColors.length)|0];
+        const mesh = new THREE.Mesh(boxGeo(w,h,d), facadeMat(col, w, h));
+        mesh.position.set(bx, h/2, bz);
+        mesh.castShadow = true; mesh.receiveShadow = true;
+        buildingGroup.add(mesh);
+        // roof cap
+        const roof = new THREE.Mesh(boxGeo(w+0.4, 1.2, d+0.4), new THREE.MeshStandardMaterial({color:roofColor, roughness:0.9}));
+        roof.position.set(bx, h+0.6, bz); roof.castShadow=true; buildingGroup.add(roof);
+        colliders.push({ x:bx, z:bz, hw:w/2, hd:d/2 });
+      }
+    }
+  }
+}
+
+setLoad(0.5, 'Placing landmarks…');
+
+// ============================================================
+//  LANDMARKS
+// ============================================================
+const landmarks = []; // {name, x, z, r} for place-name notifications
+
+function addBigBen(x,z){
+  const g = new THREE.Group();
+  const stoneMat = new THREE.MeshStandardMaterial({ color: 0xbfa77e, roughness: 0.85 });
+  const tower = new THREE.Mesh(new THREE.BoxGeometry(9, 60, 9), stoneMat);
+  tower.position.y = 30; tower.castShadow = true; g.add(tower);
+  // clock faces
+  const clockMat = new THREE.MeshStandardMaterial({ color: 0xf4f0e0, emissive:0x333018, emissiveIntensity:0.4 });
+  for(let k=0;k<4;k++){
+    const cl = new THREE.Mesh(new THREE.CircleGeometry(3, 24), clockMat);
+    const ang = k*Math.PI/2;
+    cl.position.set(Math.sin(ang)*4.55, 50, Math.cos(ang)*4.55);
+    cl.rotation.y = ang; g.add(cl);
+  }
+  // spire
+  const spire = new THREE.Mesh(new THREE.ConeGeometry(6.6, 16, 4), new THREE.MeshStandardMaterial({color:0x5a6b52, roughness:0.7, metalness:0.3}));
+  spire.position.y = 68; spire.rotation.y=Math.PI/4; spire.castShadow=true; g.add(spire);
+  const tip = new THREE.Mesh(new THREE.ConeGeometry(1.2, 6, 8), new THREE.MeshStandardMaterial({color:0xd4af37, metalness:0.8, roughness:0.3}));
+  tip.position.y = 78; g.add(tip);
+  g.position.set(x, 0, z); scene.add(g);
+  colliders.push({x, z, hw:4.5, hd:4.5});
+  landmarks.push({name:'Elizabeth Tower · Big Ben', x, z, r:40});
+}
+
+function addEye(x,z){
+  const g = new THREE.Group();
+  const metal = new THREE.MeshStandardMaterial({ color: 0xcdd6df, metalness:0.7, roughness:0.35 });
+  const R = 26;
+  const wheel = new THREE.Mesh(new THREE.TorusGeometry(R, 0.7, 12, 64), metal);
+  wheel.position.y = R+2; wheel.castShadow=true; g.add(wheel);
+  // spokes
+  const spokeMat = new THREE.MeshStandardMaterial({ color:0xdfe6ec, metalness:0.5, roughness:0.5 });
+  for(let k=0;k<24;k++){
+    const ang = k/24*Math.PI*2;
+    const s = new THREE.Mesh(new THREE.CylinderGeometry(0.12,0.12,R,6), spokeMat);
+    s.position.set(Math.cos(ang)*R/2, R+2 + Math.sin(ang)*R/2, 0);
+    s.rotation.z = ang + Math.PI/2; g.add(s);
+    // capsules (pods)
+    const pod = new THREE.Mesh(new THREE.SphereGeometry(1.5, 12, 8), new THREE.MeshStandardMaterial({color:0xbfe3f5, metalness:0.3, roughness:0.2, transparent:true, opacity:0.85}));
+    pod.position.set(Math.cos(ang)*R, R+2 + Math.sin(ang)*R, 0); g.add(pod);
+  }
+  // A-frame supports
+  const legMat = new THREE.MeshStandardMaterial({color:0xb8c2cc, metalness:0.6, roughness:0.4});
+  for(const sx of [-8,8]){
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.8,1.1,R+6,10), legMat);
+    leg.position.set(sx, (R+6)/2, 6); leg.rotation.x = -0.25; leg.castShadow=true; g.add(leg);
+  }
+  g.position.set(x,0,z); g.rotation.y = Math.PI/2; scene.add(g);
+  landmarks.push({name:'London Eye', x, z, r:44});
+}
+
+function addStPauls(x,z){
+  const g = new THREE.Group();
+  const stone = new THREE.MeshStandardMaterial({color:0xe8e2d4, roughness:0.85});
+  const base = new THREE.Mesh(new THREE.BoxGeometry(30,18,20), stone); base.position.y=9; base.castShadow=true; base.receiveShadow=true; g.add(base);
+  const drum = new THREE.Mesh(new THREE.CylinderGeometry(8,8,10,24), stone); drum.position.y=23; drum.castShadow=true; g.add(drum);
+  const dome = new THREE.Mesh(new THREE.SphereGeometry(8,24,16,0,Math.PI*2,0,Math.PI/2), new THREE.MeshStandardMaterial({color:0x6f7d78, metalness:0.3, roughness:0.6})); dome.position.y=28; dome.castShadow=true; g.add(dome);
+  const lantern = new THREE.Mesh(new THREE.CylinderGeometry(2,2,7,12), stone); lantern.position.y=39; g.add(lantern);
+  const cross = new THREE.Mesh(new THREE.ConeGeometry(1.4,5,8), new THREE.MeshStandardMaterial({color:0xd4af37,metalness:0.8,roughness:0.3})); cross.position.y=45; g.add(cross);
+  // two west towers
+  for(const sx of [-11,11]){ const t=new THREE.Mesh(new THREE.CylinderGeometry(2.4,2.4,26,16), stone); t.position.set(sx,13,10); t.castShadow=true; g.add(t);
+    const cap=new THREE.Mesh(new THREE.ConeGeometry(3,5,16), stone); cap.position.set(sx,28,10); g.add(cap);}
+  g.position.set(x,0,z); scene.add(g);
+  colliders.push({x,z,hw:15,hd:10});
+  landmarks.push({name:"St Paul's Cathedral", x, z, r:40});
+}
+
+function addShard(x,z){
+  const g = new THREE.Group();
+  const glass = new THREE.MeshStandardMaterial({color:0xaebfca, metalness:0.6, roughness:0.15, transparent:true, opacity:0.9, emissive:0x2a3a46, emissiveIntensity:0.3});
+  const geo = new THREE.CylinderGeometry(0.4, 11, 96, 8);
+  const s = new THREE.Mesh(geo, glass); s.position.y=48; s.castShadow=true; g.add(s);
+  g.position.set(x,0,z); g.rotation.y=Math.PI/8; scene.add(g);
+  colliders.push({x,z,hw:8,hd:8});
+  landmarks.push({name:'The Shard', x, z, r:44});
+}
+
+function addGherkin(x,z){
+  const g = new THREE.Group();
+  const glass = new THREE.MeshStandardMaterial({color:0x7fae9a, metalness:0.6, roughness:0.2, emissive:0x22332c, emissiveIntensity:0.3});
+  // bulge profile via lathe
+  const pts=[]; for(let i=0;i<=12;i++){ const t=i/12; const y=t*60; const r=9*Math.sin(Math.PI*(0.15+t*0.8))+2; pts.push(new THREE.Vector2(Math.max(0.6,r),y)); }
+  const s = new THREE.Mesh(new THREE.LatheGeometry(pts, 24), glass); s.castShadow=true; g.add(s);
+  const tip=new THREE.Mesh(new THREE.SphereGeometry(2,16,12), new THREE.MeshStandardMaterial({color:0xbfe0d4,metalness:0.4,roughness:0.2})); tip.position.y=61; g.add(tip);
+  // diagonal glazing lines
+  g.position.set(x,0,z); scene.add(g);
+  colliders.push({x,z,hw:9,hd:9});
+  landmarks.push({name:'30 St Mary Axe · The Gherkin', x, z, r:36});
+}
+
+function addPark(x,z){
+  const g = new THREE.Group();
+  const grass = new THREE.Mesh(new THREE.PlaneGeometry(BLOCK-2, BLOCK-2), new THREE.MeshStandardMaterial({color:0x4f7a3a, roughness:1}));
+  grass.rotation.x=-Math.PI/2; grass.position.y=0.03; grass.receiveShadow=true; g.add(grass);
+  // pond
+  const pond = new THREE.Mesh(new THREE.CircleGeometry(9,32), new THREE.MeshStandardMaterial({color:0x2f6d8c, metalness:0.4, roughness:0.15})); pond.rotation.x=-Math.PI/2; pond.position.set(6,0.05,-4); g.add(pond);
+  // trees
+  for(let k=0;k<14;k++){
+    const tx=(rnd()-0.5)*(BLOCK-8), tz=(rnd()-0.5)*(BLOCK-8);
+    if(Math.hypot(tx-6,tz+4)<11) continue;
+    g.add(makeTree(tx,tz));
+  }
+  g.position.set(x,0,z); scene.add(g);
+  landmarks.push({name:'St James’s Park', x, z, r:30});
+}
+
+function makeTree(x,z){
+  const t = new THREE.Group();
+  const h = 3+rnd()*3;
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.3,0.45,h,6), new THREE.MeshStandardMaterial({color:0x6b4b2f, roughness:1}));
+  trunk.position.y=h/2; trunk.castShadow=true; t.add(trunk);
+  const leaves = new THREE.Mesh(new THREE.IcosahedronGeometry(2+rnd()*1.2, 0), new THREE.MeshStandardMaterial({color:new THREE.Color().setHSL(0.28,0.5,0.32+rnd()*0.1), roughness:1, flatShading:true}));
+  leaves.position.y=h+1; leaves.castShadow=true; t.add(leaves);
+  t.position.set(x,0,z);
+  return t;
+}
+
+landmarkPlan.forEach(l=>{
+  const {x,z} = blockCenter(l.i,l.j);
+  if(l.type==='bigben') addBigBen(x,z);
+  else if(l.type==='eye') addEye(x,z);
+  else if(l.type==='stpauls') addStPauls(x,z);
+  else if(l.type==='shard') addShard(x,z);
+  else if(l.type==='gherkin') addGherkin(x,z);
+  else if(l.type==='park') addPark(x,z);
+});
+
+setLoad(0.65, 'Adding street furniture…');
+
+// ---------- Street furniture: lamps, phone boxes, post boxes, trees along roads ----------
+function makeLampPost(){
+  const g = new THREE.Group();
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.14,0.2,7,8), new THREE.MeshStandardMaterial({color:0x1c2226, roughness:0.6, metalness:0.4}));
+  pole.position.y=3.5; pole.castShadow=true; g.add(pole);
+  const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.1,0.1,1.6,6), new THREE.MeshStandardMaterial({color:0x1c2226})); arm.rotation.z=Math.PI/2; arm.position.set(0.8,7,0); g.add(arm);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.4,10,8), new THREE.MeshStandardMaterial({color:0xfff0c0, emissive:0xffcf6b, emissiveIntensity:1.2})); head.position.set(1.6,6.9,0); g.add(head);
+  return g;
+}
+function makePhoneBox(){
+  const g = new THREE.Group();
+  const red = new THREE.MeshStandardMaterial({color:0xc4122f, roughness:0.5});
+  const body = new THREE.Mesh(new THREE.BoxGeometry(2,4.2,2), red); body.position.y=2.1; body.castShadow=true; g.add(body);
+  const top = new THREE.Mesh(new THREE.BoxGeometry(2.2,0.5,2.2), red); top.position.y=4.4; g.add(top);
+  const roof = new THREE.Mesh(new THREE.BoxGeometry(1.8,0.4,1.8), red); roof.position.y=4.8; g.add(roof);
+  return g;
+}
+function makePostBox(){
+  const g = new THREE.Group();
+  const red = new THREE.MeshStandardMaterial({color:0xb01026, roughness:0.5});
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.7,0.7,2.6,16), red); body.position.y=1.3; body.castShadow=true; g.add(body);
+  const top = new THREE.Mesh(new THREE.SphereGeometry(0.7,16,8,0,Math.PI*2,0,Math.PI/2), red); top.position.y=2.6; g.add(top);
+  return g;
+}
+
+const furnitureGroup = new THREE.Group(); scene.add(furnitureGroup);
+// place lamp posts along every road at intervals, on the pavement edge
+for (const c of roadLines){
+  for (let d=-HALF; d<=HALF; d+=22){
+    // lamps along horizontal roads (z=c)
+    let l = makeLampPost(); l.position.set(d, 0, c - ROAD/2 - 1.2); furnitureGroup.add(l);
+    let l2 = makeLampPost(); l2.position.set(d, 0, c + ROAD/2 + 1.2); l2.rotation.y=Math.PI; furnitureGroup.add(l2);
+    // lamps along vertical roads (x=c)
+    let l3 = makeLampPost(); l3.position.set(c - ROAD/2 - 1.2, 0, d); l3.rotation.y=-Math.PI/2; furnitureGroup.add(l3);
+    let l4 = makeLampPost(); l4.position.set(c + ROAD/2 + 1.2, 0, d); l4.rotation.y=Math.PI/2; furnitureGroup.add(l4);
+  }
+}
+// phone/post boxes & pavement trees at some intersections
+for (const x of roadLines){
+  for (const z of roadLines){
+    const r = rnd();
+    if (r<0.10){ const p=makePhoneBox(); p.position.set(x+ROAD/2+2, 0, z+ROAD/2+2); furnitureGroup.add(p);}
+    else if (r<0.18){ const p=makePostBox(); p.position.set(x+ROAD/2+2, 0, z+ROAD/2+2); furnitureGroup.add(p);}
+    else if (r<0.30){ const t=makeTree(x+ROAD/2+2.5, z+ROAD/2+2.5); furnitureGroup.add(t);}
+  }
+}
+
+setLoad(0.78, 'Building your cab…');
+
+// ============================================================
+//  VEHICLE — the player's London black cab
+// ============================================================
+function makeCar(bodyColor=0x0b0b0d, taxi=true){
+  const car = new THREE.Group();
+  const paint = new THREE.MeshStandardMaterial({color:bodyColor, roughness:0.35, metalness:0.5});
+  const glass = new THREE.MeshStandardMaterial({color:0x223, roughness:0.1, metalness:0.3, transparent:true, opacity:0.7});
+  // lower body
+  const body = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.0, 4.6), paint); body.position.y=0.85; body.castShadow=true; car.add(body);
+  // hood/bonnet slope (front)
+  const bonnet = new THREE.Mesh(new THREE.BoxGeometry(2.15, 0.5, 1.3), paint); bonnet.position.set(0,1.15,1.7); bonnet.castShadow=true; car.add(bonnet);
+  // cabin
+  const cabin = new THREE.Mesh(new THREE.BoxGeometry(2.05, 0.95, 2.4), paint); cabin.position.set(0,1.75,-0.2); cabin.castShadow=true; car.add(cabin);
+  // windows
+  const wf = new THREE.Mesh(new THREE.BoxGeometry(1.9,0.7,0.1), glass); wf.position.set(0,1.8,1.0); car.add(wf);
+  const wb = new THREE.Mesh(new THREE.BoxGeometry(1.9,0.7,0.1), glass); wb.position.set(0,1.8,-1.4); car.add(wb);
+  const wl = new THREE.Mesh(new THREE.BoxGeometry(0.1,0.7,2.2), glass); wl.position.set(1.0,1.8,-0.2); car.add(wl);
+  const wr = wl.clone(); wr.position.x=-1.0; car.add(wr);
+  // wheels
+  const wheelGeo = new THREE.CylinderGeometry(0.55,0.55,0.4,16);
+  const wheelMat = new THREE.MeshStandardMaterial({color:0x0a0a0a, roughness:0.9});
+  const hubMat = new THREE.MeshStandardMaterial({color:0xbfc4c9, metalness:0.7, roughness:0.3});
+  const wheels=[];
+  const wpos = [[1.05,0.55,1.5],[-1.05,0.55,1.5],[1.05,0.55,-1.5],[-1.05,0.55,-1.5]];
+  wpos.forEach(p=>{
+    const w=new THREE.Group();
+    const tire=new THREE.Mesh(wheelGeo, wheelMat); tire.rotation.z=Math.PI/2; tire.castShadow=true; w.add(tire);
+    const hub=new THREE.Mesh(new THREE.CylinderGeometry(0.22,0.22,0.42,8), hubMat); hub.rotation.z=Math.PI/2; w.add(hub);
+    w.position.set(...p); car.add(w); wheels.push(w);
+  });
+  // headlights + tail lights
+  const hlMat = new THREE.MeshStandardMaterial({color:0xffffff, emissive:0xfff2c0, emissiveIntensity:1.4});
+  const tlMat = new THREE.MeshStandardMaterial({color:0xff2222, emissive:0xff1111, emissiveIntensity:1.0});
+  for(const sx of [-0.7,0.7]){ const h=new THREE.Mesh(new THREE.BoxGeometry(0.35,0.25,0.1), hlMat); h.position.set(sx,0.95,2.35); car.add(h);
+    const t=new THREE.Mesh(new THREE.BoxGeometry(0.35,0.25,0.1), tlMat); t.position.set(sx,1.0,-2.35); car.add(t);}
+  // taxi sign
+  if(taxi){ const sign=new THREE.Mesh(new THREE.BoxGeometry(1.0,0.3,0.4), new THREE.MeshStandardMaterial({color:0xffcf33, emissive:0xffb800, emissiveIntensity:0.7})); sign.position.set(0,2.35,-0.2); car.add(sign);}
+  return { car, wheels };
+}
+
+const { car: player, wheels: playerWheels } = makeCar(0x0b0b0d, true);
+player.position.set(CELL*0.5 + ROAD/4, 0, HALF - CELL*1.5); // start in a lane, facing into the city
+scene.add(player);
+
+// headlight spotlights
+const headlight = new THREE.SpotLight(0xfff2d0, 0, 60, Math.PI/5, 0.4, 1.2);
+headlight.position.set(0,1,2); player.add(headlight); player.add(headlight.target); headlight.target.position.set(0,0,10);
+
+setLoad(0.9, 'Waking the traffic…');
+
+// ============================================================
+//  TRAFFIC — AI cars & double-decker buses that drive the grid
+// ============================================================
+const traffic = [];
+function makeBus(){
+  const g = new THREE.Group();
+  const red = new THREE.MeshStandardMaterial({color:0xd0021b, roughness:0.4, metalness:0.2});
+  const glass = new THREE.MeshStandardMaterial({color:0x2a3540, roughness:0.15, metalness:0.3});
+  const body = new THREE.Mesh(new THREE.BoxGeometry(2.6, 3.6, 8.2), red); body.position.y=2.2; body.castShadow=true; g.add(body);
+  // window strips
+  for(const y of [1.6,3.1]){ const w=new THREE.Mesh(new THREE.BoxGeometry(2.62,0.7,7.4), glass); w.position.set(0,y,0); g.add(w);}
+  // wheels
+  const wm=new THREE.MeshStandardMaterial({color:0x0a0a0a, roughness:0.9});
+  [[1.3,0.6,2.6],[-1.3,0.6,2.6],[1.3,0.6,-2.6],[-1.3,0.6,-2.6]].forEach(p=>{const w=new THREE.Mesh(new THREE.CylinderGeometry(0.7,0.7,0.4,12),wm);w.rotation.z=Math.PI/2;w.position.set(...p);w.castShadow=true;g.add(w);});
+  return g;
+}
+const carColors=[0xffffff,0x1a1a1a,0x8a1220,0x14315e,0x8f9296,0x2f6d3a,0xd9b23a];
+function makeTrafficCar(){ const {car}=makeCar(carColors[(Math.random()*carColors.length)|0], false); return car; }
+
+// spawn agents that travel along road lines
+function spawnAgent(isBus){
+  const mesh = isBus ? makeBus() : makeTrafficCar();
+  scene.add(mesh);
+  // pick a road line, direction
+  const horizontal = Math.random()<0.5;
+  const line = roadLines[(Math.random()*roadLines.length)|0];
+  const dir = Math.random()<0.5?1:-1;
+  const laneOff = dir>0 ? ROAD/4 : -ROAD/4;
+  const a = {
+    mesh, isBus, horizontal, dir,
+    line, laneOff,
+    pos: (Math.random()*GRID*CELL - HALF),
+    speed: isBus ? 8+Math.random()*3 : 12+Math.random()*10,
+  };
+  traffic.push(a);
+  updateAgent(a, 0, true);
+}
+function updateAgent(a, dt, init){
+  a.pos += a.dir * a.speed * dt;
+  if (a.pos > HALF+20) a.pos = -HALF-20;
+  if (a.pos < -HALF-20) a.pos = HALF+20;
+  if (a.horizontal){
+    a.mesh.position.set(a.pos, 0, a.line + a.laneOff);
+    a.mesh.rotation.y = a.dir>0 ? Math.PI/2 : -Math.PI/2;
+  } else {
+    a.mesh.position.set(a.line + a.laneOff, 0, a.pos);
+    a.mesh.rotation.y = a.dir>0 ? 0 : Math.PI;
+  }
+}
+for(let k=0;k<26;k++) spawnAgent(false);
+for(let k=0;k<8;k++) spawnAgent(true);
+
+// ---------- Pedestrians (simple) ----------
+const peds = [];
+function makePed(){
+  const g = new THREE.Group();
+  const col = new THREE.Color().setHSL(Math.random(),0.4,0.4);
+  const body=new THREE.Mesh(new THREE.CapsuleGeometry(0.28,0.8,4,8), new THREE.MeshStandardMaterial({color:col, roughness:0.9})); body.position.y=0.9; body.castShadow=true; g.add(body);
+  const head=new THREE.Mesh(new THREE.SphereGeometry(0.24,12,10), new THREE.MeshStandardMaterial({color:0xe0b48a, roughness:0.8})); head.position.y=1.55; g.add(head);
+  scene.add(g);
+  return g;
+}
+for(let k=0;k<40;k++){
+  const line=roadLines[(Math.random()*roadLines.length)|0];
+  const horizontal=Math.random()<0.5;
+  const side=(Math.random()<0.5?1:-1)*(ROAD/2+2);
+  const p={ mesh:makePed(), horizontal, line, side, pos:(Math.random()*GRID*CELL-HALF), dir:Math.random()<0.5?1:-1, speed:1+Math.random()*0.8, phase:Math.random()*6 };
+  peds.push(p);
+}
+
+setLoad(1.0, 'Ready.');
+
+// ============================================================
+//  CONTROLS
+// ============================================================
+const keys = {};
+addEventListener('keydown', e=>{
+  keys[e.code]=true;
+  if(e.code==='KeyC') cycleCam();
+  if(e.code==='KeyR') resetCar();
+  if(e.code==='KeyH') horn();
+  if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
+});
+addEventListener('keyup', e=>{ keys[e.code]=false; });
+
+// touch
+const touch = { gas:false, brake:false, left:false, right:false };
+function bindTouch(id, prop){
+  const el=document.getElementById(id);
+  const on=e=>{e.preventDefault();touch[prop]=true;};
+  const off=e=>{e.preventDefault();touch[prop]=false;};
+  el.addEventListener('touchstart',on,{passive:false}); el.addEventListener('touchend',off); el.addEventListener('touchcancel',off);
+  el.addEventListener('mousedown',on); el.addEventListener('mouseup',off); el.addEventListener('mouseleave',off);
+}
+bindTouch('t-gas','gas'); bindTouch('t-brake','brake'); bindTouch('t-left','left'); bindTouch('t-right','right');
+
+// ---------- audio (horn) via WebAudio ----------
+let actx;
+function horn(){
+  try{
+    actx = actx || new (window.AudioContext||window.webkitAudioContext)();
+    const o=actx.createOscillator(), g=actx.createGain();
+    o.type='square'; o.frequency.value=280; g.gain.value=0.06;
+    o.connect(g); g.connect(actx.destination); o.start();
+    g.gain.setValueAtTime(0.06, actx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime+0.5);
+    o.stop(actx.currentTime+0.5);
+  }catch(e){}
+}
+
+// ============================================================
+//  VEHICLE PHYSICS (arcade)
+// ============================================================
+const vehicle = {
+  speed: 0,          // forward speed (units/s)
+  heading: 0,        // radians, 0 = +Z? we use rotation.y
+  steer: 0,
+  maxSpeed: 46,
+  accel: 22,
+  brakeForce: 40,
+  reverseMax: -14,
+  friction: 8,
+};
+player.rotation.y = 0; // local -Z is forward → faces into the city
+vehicle.heading = player.rotation.y;
+
+function resetCar(){
+  player.position.set(CELL*0.5 + ROAD/4, 0, HALF - CELL*1.5);
+  player.rotation.set(0, 0, 0);
+  vehicle.speed = 0; vehicle.heading = 0;
+  showPlace('Reset');
+}
+
+// collision: keep player out of building boxes (simple push-out)
+function resolveCollision(px, pz){
+  for(const c of colliders){
+    const dx = px - c.x, dz = pz - c.z;
+    const ox = (c.hw + 1.2) - Math.abs(dx);
+    const oz = (c.hd + 1.2) - Math.abs(dz);
+    if(ox>0 && oz>0){
+      // push out along least-penetration axis
+      if(ox < oz){ px = c.x + Math.sign(dx||1)*(c.hw+1.2); vehicle.speed*=0.3; }
+      else { pz = c.z + Math.sign(dz||1)*(c.hd+1.2); vehicle.speed*=0.3; }
+    }
+  }
+  // world bounds
+  const B = HALF + CELL;
+  px = Math.max(-B, Math.min(B, px));
+  pz = Math.max(-B, Math.min(B, pz));
+  return [px,pz];
+}
+
+// ============================================================
+//  CAMERA
+// ============================================================
+let camMode = 0; // 0 chase, 1 far, 2 hood, 3 top
+const camModes = ['Chase','Cinematic','Bonnet','Bird'];
+function cycleCam(){ camMode=(camMode+1)%camModes.length; showPlace('Camera: '+camModes[camMode]); }
+const camTarget = new THREE.Vector3();
+const camPos = new THREE.Vector3();
+
+function updateCamera(dt){
+  const back = new THREE.Vector3(Math.sin(player.rotation.y), 0, Math.cos(player.rotation.y));
+  let desired = new THREE.Vector3(), look = new THREE.Vector3();
+  const p = player.position;
+  if(camMode===0){ desired.set(p.x + back.x*11, p.y+5.5, p.z + back.z*11); look.set(p.x - back.x*6, p.y+1.5, p.z - back.z*6); }
+  else if(camMode===1){ desired.set(p.x + back.x*20, p.y+9, p.z + back.z*20); look.set(p.x, p.y+1, p.z); }
+  else if(camMode===2){ desired.set(p.x - back.x*0.2, p.y+2.4, p.z - back.z*0.2); look.set(p.x - back.x*10, p.y+1.8, p.z - back.z*10); }
+  else { desired.set(p.x, p.y+55, p.z+0.1); look.set(p.x, p.y, p.z); }
+  const lerp = camMode===2 ? 1 : 1-Math.pow(0.0015, dt);
+  camera.position.lerp(desired, lerp);
+  camTarget.lerp(look, lerp);
+  camera.lookAt(camTarget);
+}
+camTarget.copy(player.position);
+
+// ============================================================
+//  HUD
+// ============================================================
+const spdEl=document.getElementById('spd'), dirEl=document.getElementById('dir'), coordsEl=document.getElementById('coords'), gearEl=document.getElementById('gear');
+const placeEl=document.getElementById('place');
+let placeTimer=0;
+function showPlace(txt){ placeEl.textContent=txt; placeEl.classList.add('show'); placeTimer=2.6; }
+const compassDirs=['N','NE','E','SE','S','SW','W','NW'];
+let lastLandmark=null;
+
+// minimap
+const mm=document.getElementById('mm'), mmx=mm.getContext('2d');
+function drawMinimap(){
+  const W=mm.width, H=mm.height, R=W/2;
+  mmx.clearRect(0,0,W,H);
+  mmx.fillStyle='#20242c'; mmx.fillRect(0,0,W,H);
+  const scale = W / ((GRID+2)*CELL);
+  const cx=W/2, cy=H/2;
+  const toMap=(x,z)=>[cx + (x-player.position.x)*scale, cy + (z-player.position.z)*scale];
+  // roads
+  mmx.strokeStyle='#3a4150'; mmx.lineWidth=Math.max(2,ROAD*scale);
+  for(const c of roadLines){
+    let [ax,ay]=toMap(-HALF,c),[bx,by]=toMap(HALF,c); mmx.beginPath();mmx.moveTo(ax,ay);mmx.lineTo(bx,by);mmx.stroke();
+    let [cx1,cy1]=toMap(c,-HALF),[dx,dy]=toMap(c,HALF); mmx.beginPath();mmx.moveTo(cx1,cy1);mmx.lineTo(dx,dy);mmx.stroke();
+  }
+  // landmarks
+  landmarks.forEach(l=>{ const [x,y]=toMap(l.x,l.z); mmx.fillStyle='#ffd166'; mmx.beginPath();mmx.arc(x,y,4,0,7);mmx.fill(); });
+  // traffic dots
+  mmx.fillStyle='#88909c';
+  traffic.forEach(a=>{ const [x,y]=toMap(a.mesh.position.x,a.mesh.position.z); if(x>0&&x<W&&y>0&&y<H){mmx.fillRect(x-1,y-1,2,2);} });
+  // player (center, arrow)
+  mmx.save(); mmx.translate(cx,cy); mmx.rotate(-player.rotation.y+Math.PI);
+  mmx.fillStyle='#e63946'; mmx.beginPath(); mmx.moveTo(0,-8); mmx.lineTo(6,7); mmx.lineTo(0,3); mmx.lineTo(-6,7); mmx.closePath(); mmx.fill();
+  mmx.restore();
+}
+
+// ============================================================
+//  MAIN LOOP
+// ============================================================
+let last=performance.now();
+let started=false;
+function frame(now){
+  const dt=Math.min(0.05,(now-last)/1000); last=now;
+  update(dt);
+  renderer.render(scene,camera);
+  requestAnimationFrame(frame);
+}
+
+function update(dt){
+  // ----- input -----
+  const gas   = keys['KeyW']||keys['ArrowUp']||touch.gas;
+  const brake = keys['KeyS']||keys['ArrowDown']||touch.brake;
+  const left  = keys['KeyA']||keys['ArrowLeft']||touch.left;
+  const right = keys['KeyD']||keys['ArrowRight']||touch.right;
+  const hand  = keys['Space'];
+
+  // ----- longitudinal -----
+  if(gas){ vehicle.speed += vehicle.accel*dt; }
+  else if(brake){
+    if(vehicle.speed>0.2) vehicle.speed -= vehicle.brakeForce*dt;
+    else vehicle.speed -= vehicle.accel*0.7*dt;
+  } else {
+    // engine braking / friction
+    if(vehicle.speed>0) vehicle.speed=Math.max(0,vehicle.speed-vehicle.friction*dt);
+    else if(vehicle.speed<0) vehicle.speed=Math.min(0,vehicle.speed+vehicle.friction*dt);
+  }
+  if(hand){ vehicle.speed *= (1-2.5*dt); }
+  vehicle.speed=Math.max(vehicle.reverseMax, Math.min(vehicle.maxSpeed, vehicle.speed));
+
+  // ----- steering (speed-sensitive) -----
+  const speedFactor = Math.min(1, Math.abs(vehicle.speed)/vehicle.maxSpeed);
+  const steerRate = 1.9 * (0.35 + 0.65*(1-speedFactor*0.4));
+  let steerInput = (left?1:0) - (right?1:0);
+  vehicle.steer += ((steerInput) - vehicle.steer)*Math.min(1,dt*8);
+  const grip = hand ? 0.3 : 1;
+  if(Math.abs(vehicle.speed)>0.3){
+    player.rotation.y += vehicle.steer * steerRate * dt * Math.sign(vehicle.speed) * grip;
+  }
+
+  // ----- integrate position -----
+  const fwd = new THREE.Vector3(Math.sin(player.rotation.y),0,Math.cos(player.rotation.y));
+  let nx = player.position.x - fwd.x*vehicle.speed*dt; // note: car faces -Z convention
+  let nz = player.position.z - fwd.z*vehicle.speed*dt;
+  [nx,nz]=resolveCollision(nx,nz);
+  player.position.x=nx; player.position.z=nz;
+
+  // slight body roll & wheel spin
+  const rollTarget = -vehicle.steer*0.06*speedFactor;
+  player.rotation.z += (rollTarget - player.rotation.z)*Math.min(1,dt*6);
+  const spin = vehicle.speed*dt/0.55;
+  playerWheels.forEach((w,i)=>{ w.children[0].rotation.x += spin; w.children[1].rotation.x += spin;
+    if(i<2){ w.rotation.y = vehicle.steer*0.4; } });
+
+  // headlight subtle (kept off by day, but on for tunnels/shadows feel)
+  // headlight.intensity = 0;
+
+  // ----- traffic & peds -----
+  for(const a of traffic) updateAgent(a, dt);
+  for(const p of peds){
+    p.pos += p.dir*p.speed*dt;
+    if(p.pos>HALF){p.pos=-HALF;} if(p.pos<-HALF){p.pos=HALF;}
+    p.phase+=dt*6;
+    const bob=Math.abs(Math.sin(p.phase))*0.08;
+    if(p.horizontal){ p.mesh.position.set(p.pos,bob,p.line+p.side); p.mesh.rotation.y=p.dir>0?Math.PI/2:-Math.PI/2;}
+    else { p.mesh.position.set(p.line+p.side,bob,p.pos); p.mesh.rotation.y=p.dir>0?0:Math.PI;}
+  }
+
+  // ----- camera & sun follow -----
+  updateCamera(dt);
+  sun.position.set(player.position.x+120, 180, player.position.z+80);
+  sun.target.position.copy(player.position);
+
+  // ----- HUD -----
+  const mph=Math.round(Math.abs(vehicle.speed)*2.1);
+  spdEl.textContent=mph;
+  gearEl.textContent = vehicle.speed<-0.3 ? 'R' : 'D';
+  // compass
+  let ang=(player.rotation.y*180/Math.PI)%360; if(ang<0)ang+=360;
+  dirEl.textContent=compassDirs[Math.round(ang/45)%8];
+  coordsEl.textContent = `${Math.round(player.position.x)}, ${Math.round(player.position.z)}`;
+  // landmark proximity
+  let near=null,nd=1e9;
+  for(const l of landmarks){ const d=Math.hypot(l.x-player.position.x,l.z-player.position.z); if(d<l.r && d<nd){nd=d;near=l;} }
+  if(near && near!==lastLandmark){ showPlace('▸ '+near.name); lastLandmark=near; }
+  if(!near) lastLandmark=null;
+  if(placeTimer>0){ placeTimer-=dt; if(placeTimer<=0) placeEl.classList.remove('show'); }
+
+  drawMinimap();
+}
+
+// ============================================================
+//  START
+// ============================================================
+addEventListener('resize', ()=>{
+  camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+});
+
+// kick off after a short beat so the loader shows
+requestAnimationFrame(frame);
+setTimeout(()=>{
+  loadEl.style.opacity='0';
+  setTimeout(()=>loadEl.style.display='none', 800);
+  showPlace('Welcome to London');
+}, 600);
+</script>
+</body>
+</html>
