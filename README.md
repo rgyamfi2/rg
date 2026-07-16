@@ -11,7 +11,7 @@ vendored into the repo, so it runs straight from a URL.
 
 ## ▶️ Play
 
-Once GitHub Pages is live (see below), open:
+Once GitHub Pages is live (one-time setup below), open:
 
 **https://rgyamfi2.github.io/rg/**
 
@@ -33,19 +33,19 @@ Cameras cycle through **Chase → Cinematic → Bonnet → Bird's-eye**. A live
 **minimap** (top-right) shows the street grid, traffic, and landmark markers,
 and place names pop up as you approach each landmark.
 
-## 🌐 Publishing (GitHub Pages)
+## 🌐 Publishing (GitHub Pages) — one-time setup
 
-This repo includes a workflow (`.github/workflows/pages.yml`) that deploys the
-site automatically. On the first push it tries to **enable Pages for you**
-(`actions/configure-pages` with `enablement: true`).
+GitHub won't let automation switch Pages on for the first time, so flip this
+one setting yourself (takes ~30 seconds, only ever needed once):
 
-If the automatic step is blocked by repository settings, enable it manually once:
+1. Open the repo on GitHub → **Settings** → **Pages**.
+2. Under **Build and deployment → Source**, choose **Deploy from a branch**.
+3. Set **Branch** to `claude/london-freeroam-game-xaqk00` and folder to
+   **`/ (root)`**, then click **Save**.
+4. Wait ~1 minute, then open **https://rgyamfi2.github.io/rg/**.
 
-1. Go to **Settings → Pages**.
-2. Under **Build and deployment → Source**, choose **GitHub Actions**.
-3. Re-run the *Deploy London Drive to GitHub Pages* workflow (Actions tab).
-
-Your game will then be live at `https://rgyamfi2.github.io/rg/`.
+That's it — the game is live at that URL and you can share it with anyone.
+A `.nojekyll` file is included so GitHub serves the files exactly as they are.
 
 ## 🛠 Tech
 
