@@ -41,6 +41,20 @@
   #taxi .jtimer { font-size: 15px; font-weight: 800; margin-top: 4px; font-variant-numeric: tabular-nums; letter-spacing: 1px; display:none; }
   #taxi .jtimer.show { display: block; }
   #taxi .jtimer.warn { color: #ff5a4d; }
+  #taxi .shift { font-size: 12px; letter-spacing: 1px; opacity: .8; margin-bottom: 4px; font-variant-numeric: tabular-nums; }
+  #taxi .shift .warn { color:#ff5a4d; font-weight:700; }
+  /* end-of-shift screen */
+  #shiftend { position: fixed; inset: 0; z-index: 40; display: none; align-items: center; justify-content: center;
+    background: rgba(8,10,16,.72); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+  #shiftend.show { display: flex; }
+  #shiftend .card { background: rgba(18,22,32,.96); border: 1px solid rgba(255,255,255,.14); border-radius: 18px;
+    padding: 30px 40px; text-align: center; color: #fff; max-width: 340px; }
+  #shiftend h2 { font-size: 26px; font-weight: 800; margin-bottom: 6px; }
+  #shiftend .big { font-size: 46px; font-weight: 800; color: #ffd166; margin: 10px 0; letter-spacing: -1px; }
+  #shiftend .sub { font-size: 14px; opacity: .8; line-height: 1.7; }
+  #shiftend .best { color: #34d17a; font-weight: 700; }
+  #shiftend button { margin-top: 22px; pointer-events: auto; cursor: pointer; border: none; border-radius: 12px;
+    padding: 13px 30px; font-size: 15px; font-weight: 700; color: #0b0e14; background: linear-gradient(180deg,#ffe08a,#ffcf33); font-family: inherit; }
 
   /* Damage / bodywork meter (bottom-right, above the speedo) */
   #dmgwrap { right: 20px; bottom: 128px; width: 168px; padding: 9px 14px; }
@@ -117,7 +131,7 @@
 <div id="mirror" data-label="REAR VIEW"></div>
 
 <div id="hud">
-  <div id="taxi" class="panel"><div class="fare">£<span id="cash">0</span> <span class="fares">· <span id="fares">0</span> fares</span></div><div class="job" id="jobtxt">Starting shift…</div><div class="jtimer" id="jobtimer"></div></div>
+  <div id="taxi" class="panel"><div class="shift" id="shift"></div><div class="fare">£<span id="cash">0</span> <span class="fares">· <span id="fares">0</span> fares</span></div><div class="job" id="jobtxt">Starting shift…</div><div class="jtimer" id="jobtimer"></div></div>
   <div id="minimap" class="panel"><canvas id="mm" width="360" height="360"></canvas><div class="mm-tag" id="mmTag">tap to expand</div></div>
   <div id="place" class="panel"></div>
   <div id="speedo" class="panel">
@@ -133,6 +147,13 @@
     <div><kbd>N</kbd> day/night &nbsp; <kbd>M</kbd> mirror &nbsp; <kbd>B</kbd> sound</div>
   </div>
 </div>
+
+<div id="shiftend"><div class="card">
+  <h2 id="seTitle">Shift over</h2>
+  <div class="big" id="seTakings">£0</div>
+  <div class="sub" id="seSub"></div>
+  <button id="seBtn">Start new shift</button>
+</div></div>
 
 <div id="touch">
   <div id="steer">
@@ -506,7 +527,7 @@ for(const s of hStreets){
 }
 
 // ---------- Footpaths (raised paved pavements + kerbs) ----------
-const FP = 6; // footpath width; pedestrians & cyclists use this
+const FP = 5; // footpath width; buildings are inset by this so the pavement shows
 const footMat = new THREE.MeshStandardMaterial({ color:0x777c85, roughness:1, envMapIntensity:0.15 });
 const kerbMat = new THREE.MeshStandardMaterial({ color:0x9aa0a8, roughness:0.9 });
 const footGroup = new THREE.Group(); scene.add(footGroup);
@@ -796,6 +817,7 @@ function placeShopRow(cx, cz, side, faceLen, kind){
   }
 }
 
+const PAV = FP; // pavement inset must match the footpath width
 for(let bi=0; bi<vStreets.length-1; bi++){
   for(let bj=0; bj<hStreets.length-1; bj++){
     const vA=vStreets[bi], vB=vStreets[bi+1], hA=hStreets[bj], hB=hStreets[bj+1];
@@ -810,8 +832,10 @@ for(let bi=0; bi<vStreets.length-1; bi++){
     let best=null;
     for(const b of borders){ const k=shopKindFor(b.name); if(k && (!best || shopPri[k]>shopPri[best.kind])) best={...b,kind:k}; }
 
-    // building mass (inset a touch so shopfronts sit in front)
-    const w=bw-1.2, d=bd-1.2;
+    // Inset the building behind a proper pavement, so buildings aren't right
+    // on the road. Faces: bx0/bx1 (west/east), bz0/bz1 (north/south).
+    const bx0=x0+PAV, bx1=x1-PAV, bz0=z0+PAV, bz1=z1-PAV;
+    const w=bx1-bx0, d=bz1-bz0; if(w<8||d<8) continue;
     const storeys = hotel ? 7 : best ? 5+(rnd()*2|0) : 4+(rnd()*3|0);
     const h=storeys*3.4;
     const p = hotel ? {c:0xeae4d6,k:'stone'}
@@ -819,32 +843,27 @@ for(let bi=0; bi<vStreets.length-1; bi++){
             : facadePalette[(rnd()*facadePalette.length)|0];
     const mesh=new THREE.Mesh(boxGeo(w,h,d), facadeMat(p.c,w,h,p.k));
     mesh.position.set(cx,h/2+1.2,cz); mesh.castShadow=true; mesh.receiveShadow=true; buildingGroup.add(mesh);
-    // ground floor band
     const band=new THREE.Mesh(boxGeo(w+0.3,2.4,d+0.3), new THREE.MeshStandardMaterial({color:(p.k==='brick'||p.k==='stock')?0x59504a:0x726c62, roughness:0.8}));
     band.position.set(cx,1.2,cz); band.castShadow=true; buildingGroup.add(band);
-    // cornice + roof
     const cor=new THREE.Mesh(boxGeo(w+0.6,0.8,d+0.6), new THREE.MeshStandardMaterial({color:0xf1ece0, roughness:0.85})); cor.position.set(cx,h+1.6,cz); cor.castShadow=true; buildingGroup.add(cor);
     if(storeys<=5) addPitchedRoof(buildingGroup, cx, cz, w+0.6, d+0.6, h+2.0, rnd()<0.6?slate:terracotta);
     else { const para=new THREE.Mesh(boxGeo(w+0.6,1.3,d+0.6), new THREE.MeshStandardMaterial({color:0xe9e3d6, roughness:0.9})); para.position.set(cx,h+2.2,cz); buildingGroup.add(para); }
     colliders.push({x:cx,z:cz,hw:w/2,hd:d/2});
 
     if(hotel){
-      // grand hotel: name fascias on both long sides + flag
-      placeShopRow(cx,z0, 'z0', bw, 'hotel'); // handled below with custom name
-      // overwrite: put the hotel name centrally on the street sides
-      const front=makeShopfront(hotel, Math.min(bw*0.6,20), 'hotel'); front.position.set(cx,0,z0-0.15); front.rotation.y=Math.PI; buildingGroup.add(front);
-      const front2=makeShopfront(hotel, Math.min(bw*0.6,20), 'hotel'); front2.position.set(cx,0,z1+0.15); buildingGroup.add(front2);
+      const front=makeShopfront(hotel, Math.min(w*0.6,20), 'hotel'); front.position.set(cx,0,bz0-0.15); front.rotation.y=Math.PI; buildingGroup.add(front);
+      const front2=makeShopfront(hotel, Math.min(w*0.6,20), 'hotel'); front2.position.set(cx,0,bz1+0.15); buildingGroup.add(front2);
       landmarks.push({name:hotel.replace(/’/g,"'"), x:cx, z:cz, r:38});
     } else if(best){
-      placeShopRow(cx, best.side==='z0'?z0:best.side==='z1'?z1:cz,
-                   best.side, best.len, best.kind);
-      if(best.side==='x0') placeShopRow(x0, cz, 'x0', bd, best.kind);
-      if(best.side==='x1') placeShopRow(x1, cz, 'x1', bd, best.kind);
+      const faceZ = best.side==='z0'?bz0:best.side==='z1'?bz1:cz;
+      placeShopRow(cx, faceZ, best.side, best.side.startsWith('z')?w:d, best.kind);
+      if(best.side==='x0') placeShopRow(bx0, cz, 'x0', d, best.kind);
+      if(best.side==='x1') placeShopRow(bx1, cz, 'x1', d, best.kind);
     } else {
-      // residential townhouses — railings, porticoes, a tree or two
-      const rail=makeRailings(w*0.9); rail.position.set(cx,0,z0-0.6); buildingGroup.add(rail);
-      for(const off of [-w*0.28, w*0.28]){ const po=makePortico(); po.position.set(cx+off,0,z0-0.2); po.rotation.y=Math.PI; buildingGroup.add(po); }
-      buildingGroup.add(makeTree(cx-w*0.4, z0-1.4)); buildingGroup.add(makeTree(cx+w*0.4, z0-1.4));
+      // residential townhouses — railings, porticoes and trees on the pavement
+      const rail=makeRailings(w*0.92); rail.position.set(cx,0,bz0-0.7); buildingGroup.add(rail);
+      for(const off of [-w*0.28, w*0.28]){ const po=makePortico(); po.position.set(cx+off,0,bz0-0.25); po.rotation.y=Math.PI; buildingGroup.add(po); }
+      buildingGroup.add(makeTree(cx-w*0.4, bz0-2.2)); buildingGroup.add(makeTree(cx+w*0.4, bz0-2.2));
     }
   }
 }
@@ -1208,6 +1227,40 @@ for(const v of vStreets){ for(const h of hStreets){
   if(!onRoad(cam.position.x,cam.position.z)) furnitureGroup.add(cam);
 });
 
+// ---------- Side parking: simple cars parked along the kerbs ----------
+const parkColors=[0xf2f2f2,0x1a1a1a,0x8a1220,0x14315e,0x8f9296,0x2f6d3a,0xc9a227,0x3b3f45];
+function makeParkedCar(){
+  const g=new THREE.Group();
+  const paint=new THREE.MeshStandardMaterial({color:parkColors[(rnd()*parkColors.length)|0], roughness:0.35, metalness:0.5, envMapIntensity:1.0});
+  const glass=new THREE.MeshStandardMaterial({color:0x121a24, roughness:0.1, metalness:0.5, envMapIntensity:1.2});
+  const body=new THREE.Mesh(boxGeo(2.0,0.9,4.2), paint); body.position.y=0.78; body.castShadow=true; g.add(body);
+  const cabin=new THREE.Mesh(boxGeo(1.86,0.8,2.2), paint); cabin.position.set(0,1.5,-0.1); cabin.castShadow=true; g.add(cabin);
+  const win=new THREE.Mesh(boxGeo(1.88,0.62,2.0), glass); win.position.set(0,1.52,-0.1); g.add(win);
+  const wm=new THREE.MeshStandardMaterial({color:0x0b0b0b, roughness:0.85});
+  for(const p of [[0.95,0.42,1.3],[-0.95,0.42,1.3],[0.95,0.42,-1.3],[-0.95,0.42,-1.3]]){ const w=new THREE.Mesh(new THREE.CylinderGeometry(0.42,0.42,0.34,12),wm); w.rotation.z=Math.PI/2; w.position.set(...p); g.add(w); }
+  return g;
+}
+const nearCrossH=z=>hStreets.some(h=>Math.abs(z-h.c)<h.w/2+4);
+const nearCrossV=x=>vStreets.some(v=>Math.abs(x-v.c)<v.w/2+4);
+for(const s of vStreets){ if(s.main) continue;
+  for(let z=worldBounds.z0+18; z<worldBounds.z1-18; z+=18){
+    if(nearCrossH(z)) continue;
+    for(const side of [-1,1]){ if(rnd()<0.5) continue;
+      const car=makeParkedCar(); car.position.set(s.c+side*(s.w/2-1.2),0,z+(rnd()-0.5)); car.rotation.y = rnd()<0.5?0:Math.PI;
+      scene.add(car); colliders.push({x:car.position.x, z, hw:1.1, hd:2.1});
+    }
+  }
+}
+for(const s of hStreets){ if(s.main) continue;
+  for(let x=worldBounds.x0+18; x<worldBounds.x1-18; x+=18){
+    if(nearCrossV(x)) continue;
+    for(const side of [-1,1]){ if(rnd()<0.5) continue;
+      const car=makeParkedCar(); car.position.set(x+(rnd()-0.5),0,s.c+side*(s.w/2-1.2)); car.rotation.y = rnd()<0.5?Math.PI/2:-Math.PI/2;
+      scene.add(car); colliders.push({x:car.position.x, z:car.position.z, hw:2.1, hd:1.1});
+    }
+  }
+}
+
 setLoad(0.78, 'Building your cab…');
 
 // ============================================================
@@ -1487,17 +1540,29 @@ for(let k=0;k<8;k++) spawnAgent(true);
 // ---------- Pedestrians (articulated, walking figures) ----------
 const peds = [];
 const skinCols=[0xf0c9a0,0xe0b48a,0xc98d5a,0x8a5a3a];
+const hairCols=[0x1c140e,0x3a2a18,0x6b4a2a,0x8a8378,0xd9c48a,0x201a15];
 function makePed(){
   const g = new THREE.Group();
-  const skin=new THREE.MeshStandardMaterial({color:skinCols[(Math.random()*skinCols.length)|0], roughness:0.8});
-  const shirt=new THREE.MeshStandardMaterial({color:new THREE.Color().setHSL(Math.random(),0.45,0.45), roughness:0.9});
-  const trouser=new THREE.MeshStandardMaterial({color:new THREE.Color().setHSL(Math.random(),0.15,0.22), roughness:0.9});
-  const torso=new THREE.Mesh(new THREE.CapsuleGeometry(0.2,0.42,4,8), shirt); torso.position.y=1.12; torso.castShadow=true; g.add(torso);
-  const head=new THREE.Mesh(new THREE.SphereGeometry(0.18,12,10), skin); head.position.y=1.55; head.castShadow=true; g.add(head);
-  const mkLimb=(geo,mat,x,y)=>{ const pivot=new THREE.Group(); const m=new THREE.Mesh(geo,mat); m.position.y=-geo.parameters.length/2-0.05; m.castShadow=true; pivot.add(m); pivot.position.set(x,y,0); g.add(pivot); return pivot; };
-  const armGeo=new THREE.CapsuleGeometry(0.06,0.38,4,6), legGeo=new THREE.CapsuleGeometry(0.08,0.46,4,6);
-  const armL=mkLimb(armGeo,shirt,0.26,1.34), armR=mkLimb(armGeo,shirt,-0.26,1.34);
-  const legL=mkLimb(legGeo,trouser,0.1,0.86), legR=mkLimb(legGeo,trouser,-0.1,0.86);
+  const scale=0.92+Math.random()*0.22;                 // vary height
+  const skin=new THREE.MeshStandardMaterial({color:skinCols[(Math.random()*skinCols.length)|0], roughness:0.75});
+  const shirt=new THREE.MeshStandardMaterial({color:new THREE.Color().setHSL(Math.random(),0.4,0.4+Math.random()*0.2), roughness:0.85});
+  const trouser=new THREE.MeshStandardMaterial({color:new THREE.Color().setHSL(Math.random(),0.12,0.18+Math.random()*0.15), roughness:0.9});
+  const hair=new THREE.MeshStandardMaterial({color:hairCols[(Math.random()*hairCols.length)|0], roughness:0.9});
+  const shoe=new THREE.MeshStandardMaterial({color:0x18140f, roughness:0.7});
+  // shoulders taper: torso narrower at hips
+  const torso=new THREE.Mesh(new THREE.CapsuleGeometry(0.19,0.44,4,10), shirt); torso.position.y=1.14; torso.castShadow=true; g.add(torso);
+  const hips=new THREE.Mesh(new THREE.CapsuleGeometry(0.17,0.14,4,8), trouser); hips.position.y=0.86; g.add(hips);
+  const neck=new THREE.Mesh(new THREE.CylinderGeometry(0.07,0.08,0.12,8), skin); neck.position.y=1.46; g.add(neck);
+  const head=new THREE.Mesh(new THREE.SphereGeometry(0.17,14,12), skin); head.position.y=1.6; head.scale.set(0.92,1.05,0.95); head.castShadow=true; g.add(head);
+  const hairMesh=new THREE.Mesh(new THREE.SphereGeometry(0.178,14,10,0,Math.PI*2,0,Math.PI*0.62), hair); hairMesh.position.y=1.62; g.add(hairMesh);
+  const mkLimb=(geo,mat,x,y,footMat)=>{ const pivot=new THREE.Group(); const m=new THREE.Mesh(geo,mat); m.position.y=-geo.parameters.length/2-0.05; m.castShadow=true; pivot.add(m);
+    if(footMat){ const f=new THREE.Mesh(new THREE.BoxGeometry(0.12,0.08,0.24), footMat); f.position.set(0,-geo.parameters.length-0.12,0.06); pivot.add(f); }
+    else { const h=new THREE.Mesh(new THREE.SphereGeometry(0.06,8,6), skin); h.position.y=-geo.parameters.length-0.12; pivot.add(h); }
+    pivot.position.set(x,y,0); g.add(pivot); return pivot; };
+  const armGeo=new THREE.CapsuleGeometry(0.055,0.4,4,6), legGeo=new THREE.CapsuleGeometry(0.075,0.48,4,6);
+  const armL=mkLimb(armGeo,shirt,0.25,1.36), armR=mkLimb(armGeo,shirt,-0.25,1.36);
+  const legL=mkLimb(legGeo,trouser,0.09,0.82,shoe), legR=mkLimb(legGeo,trouser,-0.09,0.82,shoe);
+  g.scale.setScalar(scale);
   g.userData={armL,armR,legL,legR};
   scene.add(g);
   return g;
@@ -1859,6 +1924,34 @@ function updateTaxi(dt){
 }
 let newJobSoon=1.0;
 
+// ----- shift: earn as much as you can before the clock runs out -----
+const shiftEl=document.getElementById('shift');
+const seEl=document.getElementById('shiftend'), seTitle=document.getElementById('seTitle'),
+      seTakings=document.getElementById('seTakings'), seSub=document.getElementById('seSub'), seBtn=document.getElementById('seBtn');
+const SHIFT=300, TARGET=150;
+let shiftLeft=SHIFT, shiftActive=true, best=0;
+try{ best=+(localStorage.getItem('ld_best')||0)||0; }catch(e){}
+function updateShift(dt){
+  if(!shiftActive) return;
+  shiftLeft-=dt;
+  shiftEl.innerHTML='⏳ <span class="'+(shiftLeft<30?'warn':'')+'">'+fmtTime(shiftLeft)+'</span> · target £'+TARGET;
+  if(shiftLeft<=0) endShift();
+}
+function endShift(){
+  shiftActive=false; shiftLeft=0; job=null; beamGroup.visible=false; timerEl.classList.remove('show');
+  const beat=earnings>best; if(beat){ best=earnings; try{localStorage.setItem('ld_best',best);}catch(e){} }
+  seTitle.textContent = earnings>=TARGET ? 'Target smashed! 🎉' : "Shift over";
+  seTakings.textContent='£'+earnings;
+  seSub.innerHTML=faresDone+' fares · target £'+TARGET+'<br>'+(beat?'<span class="best">New best!</span>':'Best £'+best);
+  seEl.classList.add('show');
+}
+function startShift(){
+  earnings=0; faresDone=0; shiftLeft=SHIFT; shiftActive=true;
+  cashEl.textContent=0; faresEl.textContent=0; jobEl.textContent='Finding first fare…';
+  seEl.classList.remove('show'); newJobSoon=0.5;
+}
+seBtn.addEventListener('click', startShift);
+
 // running a red light at speed inside a signalled junction costs a fine
 let redFineCd=0;
 function checkRedLight(dt){
@@ -1963,8 +2056,11 @@ function update(dt){
   updateEngine();
 
   // ----- taxi shift -----
-  if(newJobSoon>0){ newJobSoon-=dt; if(newJobSoon<=0) newJob(); }
-  updateTaxi(dt);
+  updateShift(dt);
+  if(shiftActive){
+    if(newJobSoon>0){ newJobSoon-=dt; if(newJobSoon<=0) newJob(); }
+    updateTaxi(dt);
+  }
 
   // ----- traffic signals (17s cycle: NS green → amber → EW green → amber) -----
   signalTimer=(signalTimer+dt)%17;
