@@ -46,7 +46,7 @@
     background: linear-gradient(90deg, #34d17a, #ffd166 55%, #ff4d3d);
     transform-origin: left; transition: transform .18s ease; }
 
-  #place { left: 50%; top: 22px; transform: translateX(-50%); padding: 9px 22px; font-size: 15px; letter-spacing: .5px; opacity: 0; transition: opacity .4s; text-align:center;}
+  #place { left: 50%; top: 150px; transform: translateX(-50%); padding: 9px 22px; font-size: 15px; letter-spacing: .5px; opacity: 0; transition: opacity .4s; text-align:center; white-space:nowrap;}
   #place.show { opacity: 1; }
 
   #help { left: 20px; bottom: 20px; padding: 12px 16px; font-size: 12.5px; line-height: 1.7; opacity: .9; max-width: 240px;}
@@ -158,6 +158,7 @@
 
 <script type="module">
 import * as THREE from 'three';
+import { RoundedBoxGeometry } from './vendor/RoundedBoxGeometry.js';
 
 /* ============================================================
    LONDON DRIVE — a free-roam driving game in a stylised London
@@ -343,6 +344,26 @@ for(const s of hStreets){
   hz.rotation.x=flatXZ; hz.position.set(midX, roadY, s.c); hz.receiveShadow=true; roadGroup.add(hz);
   markings(spanX, s.w, s.main, false)(s.c);
 }
+
+// ---------- Footpaths (raised paved pavements + kerbs) ----------
+const FP = 6; // footpath width; pedestrians & cyclists use this
+const footMat = new THREE.MeshStandardMaterial({ color:0x777c85, roughness:1, envMapIntensity:0.15 });
+const kerbMat = new THREE.MeshStandardMaterial({ color:0x9aa0a8, roughness:0.9 });
+const footGroup = new THREE.Group(); scene.add(footGroup);
+function addFootpath(len, w, vertical, c){
+  for(const side of [-1,1]){
+    const edge = c + side*(w/2);
+    const fpMid = edge + side*(FP/2);
+    // paved strip
+    const strip = new THREE.Mesh(vertical?new THREE.BoxGeometry(FP,0.12,len):new THREE.BoxGeometry(len,0.12,FP), footMat);
+    strip.position.set(vertical?fpMid:midX, 0.06, vertical?midZ:fpMid); strip.receiveShadow=true; footGroup.add(strip);
+    // kerb
+    const kerb = new THREE.Mesh(vertical?new THREE.BoxGeometry(0.4,0.22,len):new THREE.BoxGeometry(len,0.22,0.4), kerbMat);
+    kerb.position.set(vertical?edge+side*0.2:midX, 0.11, vertical?midZ:edge+side*0.2); footGroup.add(kerb);
+  }
+}
+for(const s of vStreets) addFootpath(spanZ, s.w, true, s.c);
+for(const s of hStreets) addFootpath(spanX, s.w, false, s.c);
 
 // Zebra crossings + Belisha beacons at the busy junctions
 function belisha(x, z){
@@ -1107,8 +1128,57 @@ function makeCar(bodyColor=0x0b0b0d, taxi=false, detailed=false){
   return { car, wheels, paint };
 }
 
-// Player drives a bright pillar-box-red London cab so it never blends with tarmac
-const { car: player, wheels: playerWheels, paint: playerPaint } = makeCar(0xe23b2e, true, true);
+// The player's ride is a proper curved London black cab (rounded panels)
+function makeBlackCab(){
+  const car=new THREE.Group();
+  const rb=(w,h,d,r,seg=3)=>new RoundedBoxGeometry(w,h,d,seg,Math.min(r,Math.min(w,h,d)/2-0.001));
+  const paint=new THREE.MeshPhysicalMaterial({color:0x121316, roughness:0.3, metalness:0.5, clearcoat:1.0, clearcoatRoughness:0.14, envMapIntensity:1.5});
+  const glass=new THREE.MeshStandardMaterial({color:0x121a24, roughness:0.05, metalness:0.6, envMapIntensity:1.5, transparent:true, opacity:0.72});
+  const chrome=new THREE.MeshStandardMaterial({color:0xd9dee4, metalness:1.0, roughness:0.14, envMapIntensity:1.8});
+  const trim=new THREE.MeshStandardMaterial({color:0x090909, roughness:0.6, metalness:0.4});
+  const hlMat=new THREE.MeshStandardMaterial({color:0xffffff, emissive:0xfff2c0, emissiveIntensity:1.6});
+  const tlMat=new THREE.MeshStandardMaterial({color:0xff2a22, emissive:0xff1710, emissiveIntensity:1.4});
+  const add=(geo,mat,x,y,z)=>{const m=new THREE.Mesh(geo,mat);m.castShadow=true;m.position.set(x,y,z);car.add(m);return m;};
+  // rounded main body + running boards
+  add(rb(2.12,1.3,4.4,0.44), paint, 0,1.02,0);
+  add(rb(2.32,0.16,3.3,0.07), trim, 0,0.6,0.1);
+  // short curved bonnet (front = -Z)
+  add(rb(2.0,0.66,1.6,0.3), paint, 0,1.46,-1.42);
+  // tall upright cabin + rounded roof (the classic cab silhouette)
+  add(rb(2.04,1.5,2.8,0.36), paint, 0,2.28,0.3);
+  add(rb(1.86,0.42,2.5,0.34), paint, 0,3.06,0.3);
+  // glazing
+  add(rb(1.86,0.92,0.1,0.04), glass, 0,2.34,-1.05);
+  add(rb(1.86,0.86,0.1,0.04), glass, 0,2.34,1.66);
+  add(rb(0.1,0.86,2.4,0.04), glass, 0.99,2.4,0.3);
+  add(rb(0.1,0.86,2.4,0.04), glass,-0.99,2.4,0.3);
+  // grille + round headlamps with chrome rings + chrome front bumper
+  add(rb(1.15,0.7,0.14,0.08), trim, 0,1.32,-2.22);
+  const hlGeo=new THREE.CylinderGeometry(0.28,0.28,0.16,18);
+  for(const sx of [-0.8,0.8]){ const m=new THREE.Mesh(hlGeo,hlMat); m.rotation.x=Math.PI/2; m.position.set(sx,1.42,-2.2); car.add(m);
+    const ring=new THREE.Mesh(new THREE.TorusGeometry(0.28,0.05,8,18),chrome); ring.position.set(sx,1.42,-2.18); car.add(ring); }
+  const fb=new THREE.Mesh(new THREE.CylinderGeometry(0.11,0.11,2.05,14),chrome); fb.rotation.z=Math.PI/2; fb.position.set(0,0.92,-2.32); car.add(fb);
+  // rear: tail lamps, chrome bumper, yellow plate
+  for(const sx of [-0.78,0.78]){ const t=new THREE.Mesh(new THREE.CapsuleGeometry(0.13,0.42,4,8),tlMat); t.position.set(sx,1.34,2.26); car.add(t); }
+  const rbmp=new THREE.Mesh(new THREE.CylinderGeometry(0.11,0.11,2.05,14),chrome); rbmp.rotation.z=Math.PI/2; rbmp.position.set(0,0.92,2.32); car.add(rbmp);
+  add(rb(0.92,0.28,0.06,0.02), new THREE.MeshStandardMaterial({color:0xf6d21f,roughness:0.5}), 0,0.95,2.38);
+  // wing mirrors
+  add(rb(0.3,0.22,0.16,0.05), paint, 1.2,1.86,-1.0); add(rb(0.3,0.22,0.16,0.05), paint,-1.2,1.86,-1.0);
+  // illuminated 'TAXI' roof sign
+  const sc=document.createElement('canvas'); sc.width=128;sc.height=44; const sx2=sc.getContext('2d'); sx2.fillStyle='#ffd21a';sx2.fillRect(0,0,128,44);sx2.fillStyle='#111';sx2.font='bold 26px Arial';sx2.textAlign='center';sx2.textBaseline='middle';sx2.fillText('TAXI',64,23);
+  add(new THREE.BoxGeometry(1.0,0.34,0.5), new THREE.MeshStandardMaterial({map:new THREE.CanvasTexture(sc), emissive:0xffb800, emissiveIntensity:0.9}), 0,3.4,0.15);
+  // wheels (front pair first) with chrome hubcaps
+  const wheelGeo=new THREE.CylinderGeometry(0.56,0.56,0.4,20), wheelMat=new THREE.MeshStandardMaterial({color:0x0b0b0b, roughness:0.85});
+  const wheels=[];
+  [[1.03,0.56,-1.45],[-1.03,0.56,-1.45],[1.03,0.56,1.5],[-1.03,0.56,1.5]].forEach(p=>{
+    const w=new THREE.Group();
+    const tire=new THREE.Mesh(wheelGeo,wheelMat); tire.rotation.z=Math.PI/2; tire.castShadow=true; w.add(tire);
+    const cap=new THREE.Mesh(new THREE.CylinderGeometry(0.22,0.22,0.42,12),chrome); cap.rotation.z=Math.PI/2; w.add(cap);
+    w.position.set(...p); car.add(w); wheels.push(w);
+  });
+  return { car, wheels, paint };
+}
+const { car: player, wheels: playerWheels, paint: playerPaint } = makeBlackCab();
 const curzonC = (hStreets.find(s=>s.name==='CURZON STREET')||hStreets[0]).c;
 const START = { x: midX, z: curzonC + 4, ry: -Math.PI/2 };   // on Curzon Street, heading east
 player.position.set(START.x, 0, START.z); player.rotation.y = START.ry;
@@ -1254,23 +1324,60 @@ function checkTrafficHits(){
 for(let k=0;k<26;k++) spawnAgent(false);
 for(let k=0;k<8;k++) spawnAgent(true);
 
-// ---------- Pedestrians (simple) ----------
+// ---------- Pedestrians (articulated, walking figures) ----------
 const peds = [];
+const skinCols=[0xf0c9a0,0xe0b48a,0xc98d5a,0x8a5a3a];
 function makePed(){
   const g = new THREE.Group();
-  const col = new THREE.Color().setHSL(Math.random(),0.4,0.4);
-  const body=new THREE.Mesh(new THREE.CapsuleGeometry(0.28,0.8,4,8), new THREE.MeshStandardMaterial({color:col, roughness:0.9})); body.position.y=0.9; body.castShadow=true; g.add(body);
-  const head=new THREE.Mesh(new THREE.SphereGeometry(0.24,12,10), new THREE.MeshStandardMaterial({color:0xe0b48a, roughness:0.8})); head.position.y=1.55; g.add(head);
+  const skin=new THREE.MeshStandardMaterial({color:skinCols[(Math.random()*skinCols.length)|0], roughness:0.8});
+  const shirt=new THREE.MeshStandardMaterial({color:new THREE.Color().setHSL(Math.random(),0.45,0.45), roughness:0.9});
+  const trouser=new THREE.MeshStandardMaterial({color:new THREE.Color().setHSL(Math.random(),0.15,0.22), roughness:0.9});
+  const torso=new THREE.Mesh(new THREE.CapsuleGeometry(0.2,0.42,4,8), shirt); torso.position.y=1.12; torso.castShadow=true; g.add(torso);
+  const head=new THREE.Mesh(new THREE.SphereGeometry(0.18,12,10), skin); head.position.y=1.55; head.castShadow=true; g.add(head);
+  const mkLimb=(geo,mat,x,y)=>{ const pivot=new THREE.Group(); const m=new THREE.Mesh(geo,mat); m.position.y=-geo.parameters.length/2-0.05; m.castShadow=true; pivot.add(m); pivot.position.set(x,y,0); g.add(pivot); return pivot; };
+  const armGeo=new THREE.CapsuleGeometry(0.06,0.38,4,6), legGeo=new THREE.CapsuleGeometry(0.08,0.46,4,6);
+  const armL=mkLimb(armGeo,shirt,0.26,1.34), armR=mkLimb(armGeo,shirt,-0.26,1.34);
+  const legL=mkLimb(legGeo,trouser,0.1,0.86), legR=mkLimb(legGeo,trouser,-0.1,0.86);
+  g.userData={armL,armR,legL,legR};
   scene.add(g);
   return g;
 }
-for(let k=0;k<44;k++){
+for(let k=0;k<48;k++){
   const horizontal=Math.random()<0.5;
   const s = horizontal ? hStreets[(Math.random()*hStreets.length)|0] : vStreets[(Math.random()*vStreets.length)|0];
-  const side=(Math.random()<0.5?1:-1)*(s.w/2+2);
+  const side=(Math.random()<0.5?1:-1)*(s.w/2+FP/2);   // centred on the footpath, off the road
   const lo = horizontal ? worldBounds.x0 : worldBounds.z0, hi = horizontal ? worldBounds.x1 : worldBounds.z1;
-  const p={ mesh:makePed(), horizontal, line:s.c, side, pos:lo+Math.random()*(hi-lo), dir:Math.random()<0.5?1:-1, speed:1+Math.random()*0.8, phase:Math.random()*6 };
+  const p={ mesh:makePed(), horizontal, line:s.c, side, pos:lo+Math.random()*(hi-lo), dir:Math.random()<0.5?1:-1, speed:1.1+Math.random()*0.7, phase:Math.random()*6 };
   peds.push(p);
+}
+
+// ---------- Cyclists (ride along the road near the kerb) ----------
+const cyclists=[];
+function makeCyclist(){
+  const g=new THREE.Group();
+  const frame=new THREE.MeshStandardMaterial({color:new THREE.Color().setHSL(Math.random(),0.6,0.45), roughness:0.4, metalness:0.5});
+  const tyre=new THREE.MeshStandardMaterial({color:0x111, roughness:0.8});
+  const wF=new THREE.Mesh(new THREE.TorusGeometry(0.42,0.06,8,18), tyre); wF.position.set(0,0.42,-0.6); g.add(wF);
+  const wR=new THREE.Mesh(new THREE.TorusGeometry(0.42,0.06,8,18), tyre); wR.position.set(0,0.42,0.6); g.add(wR);
+  const bar=new THREE.Mesh(new THREE.CylinderGeometry(0.04,0.04,1.2,6), frame); bar.rotation.x=Math.PI/2; bar.position.set(0,0.7,0); g.add(bar);
+  const seat=new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.05,0.5,6), frame); seat.position.set(0,0.85,0.4); g.add(seat);
+  // rider
+  const skin=new THREE.MeshStandardMaterial({color:skinCols[(Math.random()*skinCols.length)|0], roughness:0.8});
+  const shirt=new THREE.MeshStandardMaterial({color:new THREE.Color().setHSL(Math.random(),0.5,0.45), roughness:0.9});
+  const torso=new THREE.Mesh(new THREE.CapsuleGeometry(0.18,0.34,4,8), shirt); torso.position.set(0,1.28,0.15); torso.rotation.x=-0.5; torso.castShadow=true; g.add(torso);
+  const head=new THREE.Mesh(new THREE.SphereGeometry(0.17,12,10), skin); head.position.set(0,1.62,-0.1); g.add(head);
+  const helmet=new THREE.Mesh(new THREE.SphereGeometry(0.19,12,8,0,Math.PI*2,0,Math.PI/2), new THREE.MeshStandardMaterial({color:0xe23b2e, roughness:0.5})); helmet.position.set(0,1.66,-0.1); g.add(helmet);
+  g.userData={wF,wR};
+  scene.add(g);
+  return g;
+}
+for(let k=0;k<10;k++){
+  const horizontal=Math.random()<0.5;
+  const s = horizontal ? hStreets[(Math.random()*hStreets.length)|0] : vStreets[(Math.random()*vStreets.length)|0];
+  const dir=Math.random()<0.5?1:-1;
+  const side=(dir>0?1:-1)*(s.w/2-1.3);  // near the kerb, in the road
+  const lo = horizontal ? worldBounds.x0 : worldBounds.z0, hi = horizontal ? worldBounds.x1 : worldBounds.z1;
+  cyclists.push({ mesh:makeCyclist(), horizontal, line:s.c, side, pos:lo+Math.random()*(hi-lo), dir, speed:4+Math.random()*2, phase:0 });
 }
 
 setLoad(1.0, 'Ready.');
@@ -1389,11 +1496,11 @@ function resetCar(){
   damage = 0; shake = 0; jolt = 0; updateWreck();
   showPlace('Repaired');
 }
-// visual wreck: darken paint and lean the car as damage rises
+// visual wreck: the cab's paint dulls and roughens (loses its shine) with damage
 function updateWreck(){
-  const g = 1 - damage/160;
-  playerPaint.color.setRGB(0.886*g+0.05, 0.231*g+0.03, 0.180*g+0.03);
-  playerPaint.emissiveIntensity = Math.max(0.05, 0.5*(1-damage/100));
+  const soot = damage/100;
+  if('clearcoat' in playerPaint) playerPaint.clearcoat = Math.max(0.1, 1 - soot*0.85);
+  playerPaint.roughness = 0.3 + soot*0.35;
 }
 
 // collision: buildings block (with a crash), the world edge clamps
@@ -1483,15 +1590,18 @@ function drawMinimap(){
   }
   // landmarks
   landmarks.forEach(l=>{ const [x,y]=toMap(l.x,l.z); mmx.fillStyle='#ffd166'; mmx.beginPath();mmx.arc(x,y,4,0,7);mmx.fill(); });
-  // taxi job target
+  // taxi job target + a guide line from the cab to it
   if(job){ const t=job.stage==='toPickup'?job.from:job.to; const [x,y]=toMap(t.x,t.z);
-    mmx.fillStyle=job.stage==='toPickup'?'#2ecc71':'#ffb400'; mmx.beginPath();mmx.arc(x,y,6,0,7);mmx.fill();
+    const col=job.stage==='toPickup'?'#2ecc71':'#ffb400';
+    mmx.strokeStyle=col; mmx.lineWidth=3; mmx.setLineDash([8,6]);
+    mmx.beginPath(); mmx.moveTo(cx,cy); mmx.lineTo(x,y); mmx.stroke(); mmx.setLineDash([]);
+    mmx.fillStyle=col; mmx.beginPath();mmx.arc(x,y,6,0,7);mmx.fill();
     mmx.strokeStyle='#fff'; mmx.lineWidth=2; mmx.beginPath();mmx.arc(x,y,6,0,7);mmx.stroke(); }
   // traffic dots
   mmx.fillStyle='#88909c';
   traffic.forEach(a=>{ const [x,y]=toMap(a.mesh.position.x,a.mesh.position.z); if(x>0&&x<W&&y>0&&y<H){mmx.fillRect(x-1,y-1,2,2);} });
-  // player (center, arrow)
-  mmx.save(); mmx.translate(cx,cy); mmx.rotate(-player.rotation.y+Math.PI);
+  // player (center, arrow) — points the way the cab is actually heading
+  mmx.save(); mmx.translate(cx,cy); mmx.rotate(-player.rotation.y);
   mmx.fillStyle='#e63946'; mmx.beginPath(); mmx.moveTo(0,-8); mmx.lineTo(6,7); mmx.lineTo(0,3); mmx.lineTo(-6,7); mmx.closePath(); mmx.fill();
   mmx.restore();
 }
@@ -1673,10 +1783,20 @@ function update(dt){
     p.pos += p.dir*p.speed*dt;
     const plo = p.horizontal ? worldBounds.x0 : worldBounds.z0, phi = p.horizontal ? worldBounds.x1 : worldBounds.z1;
     if(p.pos>phi){p.pos=plo;} if(p.pos<plo){p.pos=phi;}
-    p.phase+=dt*6;
-    const bob=Math.abs(Math.sin(p.phase))*0.08;
+    p.phase+=dt*7;
+    const bob=Math.abs(Math.sin(p.phase))*0.06;
     if(p.horizontal){ p.mesh.position.set(p.pos,bob,p.line+p.side); p.mesh.rotation.y=p.dir>0?Math.PI/2:-Math.PI/2;}
     else { p.mesh.position.set(p.line+p.side,bob,p.pos); p.mesh.rotation.y=p.dir>0?0:Math.PI;}
+    const sw=Math.sin(p.phase)*0.5, u=p.mesh.userData;
+    u.legL.rotation.x=sw; u.legR.rotation.x=-sw; u.armL.rotation.x=-sw*0.8; u.armR.rotation.x=sw*0.8;
+  }
+  for(const c of cyclists){
+    c.pos += c.dir*c.speed*dt;
+    const clo = c.horizontal ? worldBounds.x0 : worldBounds.z0, chi = c.horizontal ? worldBounds.x1 : worldBounds.z1;
+    if(c.pos>chi){c.pos=clo;} if(c.pos<clo){c.pos=chi;}
+    if(c.horizontal){ c.mesh.position.set(c.pos,0,c.line+c.side); c.mesh.rotation.y=c.dir>0?Math.PI/2:-Math.PI/2;}
+    else { c.mesh.position.set(c.line+c.side,0,c.pos); c.mesh.rotation.y=c.dir>0?0:Math.PI;}
+    const spin=c.speed*dt/0.42; c.mesh.userData.wF.rotation.x+=spin; c.mesh.userData.wR.rotation.x+=spin;
   }
 
   // ----- camera & sun follow -----
