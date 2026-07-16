@@ -36,7 +36,11 @@
   /* Taxi shift panel (top-left) */
   #taxi { left: 20px; top: 20px; padding: 10px 16px; min-width: 150px; }
   #taxi .fare { font-size: 22px; font-weight: 800; letter-spacing: -.5px; color:#ffd166; }
+  #taxi .fare .fares { font-size: 11px; font-weight: 600; color: rgba(255,255,255,.6); letter-spacing: 0; }
   #taxi .job { font-size: 12px; opacity: .82; margin-top: 3px; line-height:1.35; max-width: 220px; }
+  #taxi .jtimer { font-size: 15px; font-weight: 800; margin-top: 4px; font-variant-numeric: tabular-nums; letter-spacing: 1px; display:none; }
+  #taxi .jtimer.show { display: block; }
+  #taxi .jtimer.warn { color: #ff5a4d; }
 
   /* Damage / bodywork meter (bottom-right, above the speedo) */
   #dmgwrap { right: 20px; bottom: 128px; width: 168px; padding: 9px 14px; }
@@ -113,7 +117,7 @@
 <div id="mirror" data-label="REAR VIEW"></div>
 
 <div id="hud">
-  <div id="taxi" class="panel"><div class="fare">£<span id="cash">0</span></div><div class="job" id="jobtxt">Starting shift…</div></div>
+  <div id="taxi" class="panel"><div class="fare">£<span id="cash">0</span> <span class="fares">· <span id="fares">0</span> fares</span></div><div class="job" id="jobtxt">Starting shift…</div><div class="jtimer" id="jobtimer"></div></div>
   <div id="minimap" class="panel"><canvas id="mm" width="360" height="360"></canvas><div class="mm-tag" id="mmTag">tap to expand</div></div>
   <div id="place" class="panel"></div>
   <div id="speedo" class="panel">
@@ -126,7 +130,7 @@
     <div><kbd>W</kbd>/<kbd>↑</kbd> accelerate &nbsp; <kbd>S</kbd>/<kbd>↓</kbd> brake/reverse</div>
     <div><kbd>A</kbd><kbd>D</kbd>/<kbd>←</kbd><kbd>→</kbd> steer &nbsp; <kbd>Space</kbd> handbrake</div>
     <div><kbd>C</kbd> camera &nbsp; <kbd>H</kbd> horn &nbsp; <kbd>R</kbd> reset</div>
-    <div><kbd>N</kbd> day/night &nbsp; <kbd>M</kbd> mirror</div>
+    <div><kbd>N</kbd> day/night &nbsp; <kbd>M</kbd> mirror &nbsp; <kbd>B</kbd> sound</div>
   </div>
 </div>
 
@@ -1387,12 +1391,13 @@ setLoad(1.0, 'Ready.');
 // ============================================================
 const keys = {};
 addEventListener('keydown', e=>{
-  keys[e.code]=true;
+  keys[e.code]=true; startEngine();
   if(e.code==='KeyC') cycleCam();
   if(e.code==='KeyR') resetCar();
   if(e.code==='KeyH') horn();
   if(e.code==='KeyM'){ mirrorOn=!mirrorOn; document.getElementById('mirror').classList.toggle('off', !mirrorOn); }
   if(e.code==='KeyN') applyNight(!night);
+  if(e.code==='KeyB'){ soundOn=!soundOn; if(soundOn) startEngine(); showPlace(soundOn?'Sound on':'Sound off'); }
   if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
 });
 addEventListener('keyup', e=>{ keys[e.code]=false; });
@@ -1401,7 +1406,7 @@ addEventListener('keyup', e=>{ keys[e.code]=false; });
 const touch = { gas:false, brake:false, left:false, right:false };
 function bindTouch(id, prop){
   const el=document.getElementById(id);
-  const on=e=>{e.preventDefault();touch[prop]=true;};
+  const on=e=>{e.preventDefault();touch[prop]=true; startEngine();};
   const off=e=>{e.preventDefault();touch[prop]=false;};
   el.addEventListener('touchstart',on,{passive:false}); el.addEventListener('touchend',off); el.addEventListener('touchcancel',off);
   el.addEventListener('mousedown',on); el.addEventListener('mouseup',off); el.addEventListener('mouseleave',off);
@@ -1436,6 +1441,28 @@ function crunch(vol){
     g.gain.setValueAtTime(0.28*vol, actx.currentTime);
     g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime+0.25);
   }catch(e){}
+}
+// engine hum — sawtooth through a low-pass, pitch & volume follow speed/throttle
+let engine=null, soundOn=true;
+function startEngine(){
+  if(engine || !soundOn) return;
+  try{
+    actx = actx || new (window.AudioContext||window.webkitAudioContext)();
+    const osc=actx.createOscillator(); osc.type='sawtooth';
+    const g=actx.createGain(); g.gain.value=0;
+    const f=actx.createBiquadFilter(); f.type='lowpass'; f.frequency.value=500;
+    osc.connect(f); f.connect(g); g.connect(actx.destination); osc.start();
+    engine={osc,g,f};
+  }catch(e){}
+}
+function updateEngine(){
+  if(!engine || !actx) return;
+  const sp=Math.abs(vehicle.speed)/vehicle.maxSpeed;
+  const gasHeld = keys['KeyW']||keys['ArrowUp']||touch.gas;
+  const t=actx.currentTime;
+  engine.osc.frequency.setTargetAtTime(52 + sp*130 + (gasHeld?18:0), t, 0.06);
+  engine.g.gain.setTargetAtTime(soundOn ? (0.012 + sp*0.05 + (gasHeld?0.012:0)) : 0, t, 0.08);
+  engine.f.frequency.setTargetAtTime(420 + sp*1300, t, 0.1);
 }
 
 // ============================================================
@@ -1609,8 +1636,10 @@ function drawMinimap(){
 // ============================================================
 //  TAXI SHIFT — pick up fares and drop them where they're going
 // ============================================================
-const cashEl=document.getElementById('cash'), jobEl=document.getElementById('jobtxt');
-let earnings=0, job=null, beamPulse=0;
+const cashEl=document.getElementById('cash'), jobEl=document.getElementById('jobtxt'),
+      timerEl=document.getElementById('jobtimer'), faresEl=document.getElementById('fares');
+let earnings=0, job=null, beamPulse=0, faresDone=0;
+const fmtTime=s=>{ s=Math.max(0,Math.ceil(s)); return Math.floor(s/60)+':'+String(s%60).padStart(2,'0'); };
 const beamGroup=new THREE.Group();
 const beamMat=new THREE.MeshBasicMaterial({color:0x2ecc71, transparent:true, opacity:0.4, depthWrite:false});
 const beam=new THREE.Mesh(new THREE.CylinderGeometry(1.7,1.7,34,20,1,true), beamMat); beam.position.y=17; beamGroup.add(beam);
@@ -1647,15 +1676,28 @@ function updateTaxi(dt){
     if(d<7 && Math.abs(vehicle.speed)<14){
       job.stage='toDropoff'; passenger.visible=false;
       setBeam(job.to.x,job.to.z,0xffb400);
+      // on-time target based on the remaining distance to the destination
+      const dd=Math.hypot(job.to.x-player.position.x, job.to.z-player.position.z);
+      job.timeLimit=Math.max(20, dd/12+14); job.timeLeft=job.timeLimit; job.dmgStart=damage;
       jobEl.textContent='Drop off on '+job.to.name+'  ·  £'+job.fare;
       showPlace('Passenger in — to '+job.to.name+' (£'+job.fare+')'); horn();
     }
   } else {
+    job.timeLeft-=dt;
+    timerEl.classList.add('show');
+    timerEl.classList.toggle('warn', job.timeLeft<10);
+    timerEl.textContent='⏱ '+fmtTime(job.timeLeft)+(job.timeLeft<=0?'  LATE':'');
     if(d<7 && Math.abs(vehicle.speed)<9){
-      earnings+=job.fare; cashEl.textContent=earnings;
-      showPlace('Dropped off · +£'+job.fare);
-      job=null; beamGroup.visible=false; jobEl.textContent='Finding next fare…';
-      newJobSoon=0.6;
+      const onTime = job.timeLeft>0;
+      const tip = onTime ? Math.round(job.fare * Math.min(1,job.timeLeft/job.timeLimit) * 0.6) : 0;
+      const clean = (damage-job.dmgStart) < 6 ? 5 : 0;
+      const total = job.fare + tip + clean;
+      earnings+=total; faresDone++; cashEl.textContent=earnings; faresEl.textContent=faresDone;
+      let msg='Dropped off · £'+job.fare;
+      if(tip>0) msg+='  +£'+tip+' tip'; if(clean>0) msg+='  +£'+clean+' clean';
+      showPlace(msg);
+      job=null; beamGroup.visible=false; timerEl.classList.remove('show','warn');
+      jobEl.textContent='Finding next fare…'; newJobSoon=0.6;
     }
   }
 }
@@ -1762,6 +1804,7 @@ function update(dt){
     smokeTimer = damage>85 ? 0.10 : 0.22;
   }
   updateSmoke(dt);
+  updateEngine();
 
   // ----- taxi shift -----
   if(newJobSoon>0){ newJobSoon-=dt; if(newJobSoon<=0) newJob(); }
