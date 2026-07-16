@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-<title>London Drive — Free Roam</title>
+<title>London Taxi</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%9A%95%3C/text%3E%3C/svg%3E" />
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -140,11 +140,11 @@
   </div>
   <div id="dmgwrap" class="panel"><div class="dl">BODYWORK</div><div class="dbar"><div class="dfill" id="dfill"></div></div></div>
   <div id="help" class="panel">
-    <div class="t">London Drive</div>
+    <div class="t">London Taxi</div>
     <div><kbd>W</kbd>/<kbd>↑</kbd> accelerate &nbsp; <kbd>S</kbd>/<kbd>↓</kbd> brake/reverse</div>
     <div><kbd>A</kbd><kbd>D</kbd>/<kbd>←</kbd><kbd>→</kbd> steer &nbsp; <kbd>Space</kbd> handbrake</div>
     <div><kbd>C</kbd> camera &nbsp; <kbd>H</kbd> horn &nbsp; <kbd>R</kbd> reset</div>
-    <div><kbd>N</kbd> day/night &nbsp; <kbd>M</kbd> mirror &nbsp; <kbd>B</kbd> sound</div>
+    <div><kbd>N</kbd> day/night &nbsp; <kbd>V</kbd> weather &nbsp; <kbd>M</kbd> mirror &nbsp; <kbd>B</kbd> sound</div>
   </div>
 </div>
 
@@ -167,7 +167,7 @@
 </div>
 
 <div id="load">
-  <h1>LONDON <span>DRIVE</span></h1>
+  <h1>LONDON <span>TAXI</span></h1>
   <p>Free Roam</p>
   <div class="bar"><div class="fill" id="fill"></div></div>
   <small id="lmsg">Building the city…</small>
@@ -1425,7 +1425,36 @@ function applyNight(on){
   }
   nightSprites.forEach(s=>s.visible=on);
   lampHeadMat.emissiveIntensity = on?2.6:0.5;
+  setWeather(weather);           // re-apply weather-consistent fog/exposure
   showPlace(on?'Night':'Day');
+}
+
+// ---------- Weather: rain + wet-road reflections ----------
+const RAIN_N=650, rainPos=new Float32Array(RAIN_N*2*3), drops=[];
+for(let i=0;i<RAIN_N;i++) drops.push({x:(Math.random()-0.5)*130, y:Math.random()*70, z:(Math.random()-0.5)*130, v:40+Math.random()*34, len:1.2+Math.random()*1.6});
+const rainGeo=new THREE.BufferGeometry(); rainGeo.setAttribute('position', new THREE.BufferAttribute(rainPos,3));
+const rain=new THREE.LineSegments(rainGeo, new THREE.LineBasicMaterial({color:0xb4c4d4, transparent:true, opacity:0.34}));
+rain.frustumCulled=false; rain.visible=false; scene.add(rain);
+function updateRain(dt){
+  if(!rain.visible) return;
+  const px=camera.position.x, py=camera.position.y, pz=camera.position.z; let k=0;
+  for(const d of drops){
+    const tx=px+d.x, ty=d.y, tz=pz+d.z;
+    rainPos[k++]=tx; rainPos[k++]=ty; rainPos[k++]=tz;
+    rainPos[k++]=tx+1.4; rainPos[k++]=ty-d.len*3; rainPos[k++]=tz;
+    d.y-=d.v*dt; if(d.y<py-10){ d.y=py+45+Math.random()*25; d.x=(Math.random()-0.5)*130; d.z=(Math.random()-0.5)*130; }
+  }
+  rainGeo.attributes.position.needsUpdate=true;
+}
+let weather='clear';
+function setWeather(w){
+  weather=w; const wet=(w==='rain'); rain.visible=wet;
+  mainMat.roughness=wet?0.26:0.72; mainMat.envMapIntensity=wet?1.1:0.5;
+  sideMat.roughness=wet?0.32:0.8;  sideMat.envMapIntensity=wet?1.0:0.4;
+  footMat.roughness=wet?0.5:1.0;   footMat.envMapIntensity=wet?0.65:0.15;
+  renderer.toneMappingExposure = (night?1.0:1.18) * (wet?0.86:1.0);
+  scene.fog.color.set(wet ? (night?0x0e1524:0x8f96a0) : (night?0x141d33:0xbfd2e0));
+  scene.fog.far  = wet ? (night?360:430) : (night?500:620);
 }
 
 setLoad(0.9, 'Waking the traffic…');
@@ -1619,6 +1648,7 @@ addEventListener('keydown', e=>{
   if(e.code==='KeyM'){ mirrorOn=!mirrorOn; document.getElementById('mirror').classList.toggle('off', !mirrorOn); }
   if(e.code==='KeyN') applyNight(!night);
   if(e.code==='KeyB'){ soundOn=!soundOn; if(soundOn) startEngine(); showPlace(soundOn?'Sound on':'Sound off'); }
+  if(e.code==='KeyV'){ setWeather(weather==='rain'?'clear':'rain'); showPlace(weather==='rain'?'☔ Rain':'☀ Clear'); }
   if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
 });
 addEventListener('keyup', e=>{ keys[e.code]=false; });
@@ -1664,7 +1694,19 @@ function crunch(vol){
   }catch(e){}
 }
 // engine hum — sawtooth through a low-pass, pitch & volume follow speed/throttle
-let engine=null, soundOn=true;
+let engine=null, soundOn=true, rainNoise=null;
+function ensureRainSound(){
+  if(rainNoise || !actx) return;
+  try{
+    const n=actx.sampleRate*2, buf=actx.createBuffer(1,n,actx.sampleRate), d=buf.getChannelData(0);
+    for(let i=0;i<n;i++) d[i]=(Math.random()*2-1);
+    const src=actx.createBufferSource(); src.buffer=buf; src.loop=true;
+    const g=actx.createGain(); g.gain.value=0;
+    const f=actx.createBiquadFilter(); f.type='bandpass'; f.frequency.value=2600; f.Q.value=0.5;
+    src.connect(f); f.connect(g); g.connect(actx.destination); src.start();
+    rainNoise={g};
+  }catch(e){}
+}
 function startEngine(){
   if(engine || !soundOn) return;
   try{
@@ -1674,16 +1716,20 @@ function startEngine(){
     const f=actx.createBiquadFilter(); f.type='lowpass'; f.frequency.value=500;
     osc.connect(f); f.connect(g); g.connect(actx.destination); osc.start();
     engine={osc,g,f};
+    ensureRainSound();
   }catch(e){}
 }
 function updateEngine(){
-  if(!engine || !actx) return;
-  const sp=Math.abs(vehicle.speed)/vehicle.maxSpeed;
-  const gasHeld = keys['KeyW']||keys['ArrowUp']||touch.gas;
+  if(!actx) return;
   const t=actx.currentTime;
-  engine.osc.frequency.setTargetAtTime(52 + sp*130 + (gasHeld?18:0), t, 0.06);
-  engine.g.gain.setTargetAtTime(soundOn ? (0.012 + sp*0.05 + (gasHeld?0.012:0)) : 0, t, 0.08);
-  engine.f.frequency.setTargetAtTime(420 + sp*1300, t, 0.1);
+  if(engine){
+    const sp=Math.abs(vehicle.speed)/vehicle.maxSpeed;
+    const gasHeld = keys['KeyW']||keys['ArrowUp']||touch.gas;
+    engine.osc.frequency.setTargetAtTime(52 + sp*130 + (gasHeld?18:0), t, 0.06);
+    engine.g.gain.setTargetAtTime(soundOn ? (0.012 + sp*0.05 + (gasHeld?0.012:0)) : 0, t, 0.08);
+    engine.f.frequency.setTargetAtTime(420 + sp*1300, t, 0.1);
+  }
+  if(rainNoise) rainNoise.g.gain.setTargetAtTime((weather==='rain' && soundOn)?0.045:0, t, 0.3);
 }
 
 // ============================================================
@@ -2054,6 +2100,7 @@ function update(dt){
   }
   updateSmoke(dt);
   updateEngine();
+  updateRain(dt);
 
   // ----- taxi shift -----
   updateShift(dt);
