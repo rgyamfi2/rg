@@ -126,6 +126,7 @@
     <div><kbd>W</kbd>/<kbd>↑</kbd> accelerate &nbsp; <kbd>S</kbd>/<kbd>↓</kbd> brake/reverse</div>
     <div><kbd>A</kbd><kbd>D</kbd>/<kbd>←</kbd><kbd>→</kbd> steer &nbsp; <kbd>Space</kbd> handbrake</div>
     <div><kbd>C</kbd> camera &nbsp; <kbd>H</kbd> horn &nbsp; <kbd>R</kbd> reset</div>
+    <div><kbd>N</kbd> day/night &nbsp; <kbd>M</kbd> mirror</div>
   </div>
 </div>
 
@@ -204,23 +205,21 @@ scene.fog = new THREE.Fog(0xbfd2e0, 120, 620);
   scene.add(new THREE.Mesh(g, m));
 }
 
-// ---------- Environment reflections (PMREM from a procedural sky) ----------
-// Gives glass, car paint and wet tarmac real reflections instead of flat shading.
-{
-  const ec = document.createElement('canvas'); ec.width=512; ec.height=256;
-  const ex = ec.getContext('2d');
-  const grd = ex.createLinearGradient(0,0,0,256);
-  grd.addColorStop(0.0,'#8fc0ea'); grd.addColorStop(0.45,'#cfe0ec');
-  grd.addColorStop(0.5,'#c7cdd0'); grd.addColorStop(1.0,'#4a4f44'); // horizon → ground
+// ---------- Environment reflections (PMREM) — day + night versions ----------
+// Gives glass, car paint and tarmac real reflections; the night env is dark so
+// buildings fall into shadow and the lamps/headlights actually glow.
+function buildEnv(stops, sun){
+  const ec=document.createElement('canvas'); ec.width=512; ec.height=256; const ex=ec.getContext('2d');
+  const grd=ex.createLinearGradient(0,0,0,256); stops.forEach(([o,c])=>grd.addColorStop(o,c));
   ex.fillStyle=grd; ex.fillRect(0,0,512,256);
-  // sun blob
-  const sg=ex.createRadialGradient(360,70,4,360,70,60); sg.addColorStop(0,'rgba(255,250,235,1)'); sg.addColorStop(1,'rgba(255,250,235,0)');
-  ex.fillStyle=sg; ex.fillRect(300,10,120,120);
-  const envTex=new THREE.CanvasTexture(ec); envTex.mapping=THREE.EquirectangularReflectionMapping; envTex.colorSpace=THREE.SRGBColorSpace;
-  const pmrem=new THREE.PMREMGenerator(renderer); pmrem.compileEquirectangularShader();
-  scene.environment=pmrem.fromEquirectangular(envTex).texture;
-  envTex.dispose(); pmrem.dispose();
+  if(sun){ const sg=ex.createRadialGradient(360,70,4,360,70,60); sg.addColorStop(0,sun); sg.addColorStop(1,'rgba(0,0,0,0)'); ex.fillStyle=sg; ex.fillRect(300,10,120,120); }
+  const t=new THREE.CanvasTexture(ec); t.mapping=THREE.EquirectangularReflectionMapping; t.colorSpace=THREE.SRGBColorSpace; return t;
 }
+const pmrem=new THREE.PMREMGenerator(renderer); pmrem.compileEquirectangularShader();
+const dayEnv=pmrem.fromEquirectangular(buildEnv([[0,'#8fc0ea'],[0.45,'#cfe0ec'],[0.5,'#c7cdd0'],[1,'#4a4f44']],'rgba(255,250,235,1)')).texture;
+const nightEnv=pmrem.fromEquirectangular(buildEnv([[0,'#060a18'],[0.48,'#0d1428'],[0.5,'#0a0d16'],[1,'#05070c']],'rgba(120,140,190,0.5)')).texture;
+pmrem.dispose();
+scene.environment=dayEnv;
 
 // ---------- Camera ----------
 const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.5, 2000);
@@ -921,12 +920,20 @@ landmarks.push({ name:'Mayfair · W1', x:midX, z:midZ, r:80 });
 setLoad(0.65, 'Adding street furniture…');
 
 // ---------- Street furniture: lamps, phone boxes, post boxes, trees along roads ----------
+// ---- night-time glow system (additive sprite halos, toggled at night) ----
+const glowTex=(()=>{ const c=document.createElement('canvas'); c.width=c.height=64; const x=c.getContext('2d');
+  const gr=x.createRadialGradient(32,32,1,32,32,32); gr.addColorStop(0,'rgba(255,255,255,1)'); gr.addColorStop(0.4,'rgba(255,255,255,0.5)'); gr.addColorStop(1,'rgba(255,255,255,0)');
+  x.fillStyle=gr; x.fillRect(0,0,64,64); return new THREE.CanvasTexture(c); })();
+const nightSprites=[];
+function makeGlow(color,size){ const s=new THREE.Sprite(new THREE.SpriteMaterial({map:glowTex, color, transparent:true, opacity:0.85, depthWrite:false, blending:THREE.AdditiveBlending})); s.scale.set(size,size,size); s.visible=false; nightSprites.push(s); return s; }
+const lampHeadMat=new THREE.MeshStandardMaterial({color:0xfff0c0, emissive:0xffcf6b, emissiveIntensity:0.5});
 function makeLampPost(){
   const g = new THREE.Group();
   const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.14,0.2,7,8), new THREE.MeshStandardMaterial({color:0x1c2226, roughness:0.6, metalness:0.4}));
   pole.position.y=3.5; pole.castShadow=true; g.add(pole);
   const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.1,0.1,1.6,6), new THREE.MeshStandardMaterial({color:0x1c2226})); arm.rotation.z=Math.PI/2; arm.position.set(0.8,7,0); g.add(arm);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.4,10,8), new THREE.MeshStandardMaterial({color:0xfff0c0, emissive:0xffcf6b, emissiveIntensity:1.2})); head.position.set(1.6,6.9,0); g.add(head);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.4,10,8), lampHeadMat); head.position.set(1.6,6.9,0); g.add(head);
+  const glow=makeGlow(0xffd88a, 4.5); glow.position.set(1.6,6.9,0); g.add(glow);
   return g;
 }
 function makePhoneBox(){
@@ -944,21 +951,24 @@ function makePostBox(){
   const top = new THREE.Mesh(new THREE.SphereGeometry(0.7,16,8,0,Math.PI*2,0,Math.PI/2), red); top.position.y=2.6; g.add(top);
   return g;
 }
-// UK traffic signal — one aspect lit
-function makeTrafficLight(state){
+// UK traffic signal — controllable (returns {group,set})
+function makeTrafficLight(){
   const g=new THREE.Group();
   const pole=new THREE.Mesh(new THREE.CylinderGeometry(0.12,0.16,5.2,10), new THREE.MeshStandardMaterial({color:0x23262b, metalness:0.5, roughness:0.5}));
   pole.position.y=2.6; pole.castShadow=true; g.add(pole);
   const housing=new THREE.Mesh(new THREE.BoxGeometry(0.7,2.0,0.5), new THREE.MeshStandardMaterial({color:0x181a1d, roughness:0.6}));
   housing.position.set(0,5.4,0.25); g.add(housing);
-  const cols=[['#ff2a1a',0.65],['#ffb400',0],['#25d24a',-0.65]];
-  cols.forEach(([hex,dy],i)=>{
-    const on = (state==='red'&&i===0)||(state==='green'&&i===2);
-    const m=new THREE.Mesh(new THREE.CircleGeometry(0.2,16), new THREE.MeshStandardMaterial({color:hex, emissive:hex, emissiveIntensity:on?1.4:0.05}));
-    m.position.set(0,5.4+dy,0.51); g.add(m);
+  const cols=[['#ff2a1a',0.65],['#ffb400',0],['#25d24a',-0.65]]; const mats=[];
+  cols.forEach(([hex,dy])=>{
+    const mat=new THREE.MeshStandardMaterial({color:hex, emissive:hex, emissiveIntensity:0.04});
+    const m=new THREE.Mesh(new THREE.CircleGeometry(0.2,16), mat); m.position.set(0,5.4+dy,0.51); g.add(m); mats.push(mat);
   });
-  return g;
+  function set(s){ mats[0].emissiveIntensity=s==='red'?1.5:0.04; mats[1].emissiveIntensity=s==='amber'?1.5:0.04; mats[2].emissiveIntensity=s==='green'?1.5:0.04; }
+  set('red');
+  return { group:g, set };
 }
+const trafficLights=[]; // {set, axis}
+let signalTimer=0, nsGo=true, ewGo=false; // green flags for N-S / E-W traffic
 // yellow Gatso-style speed camera on a pole
 function makeSpeedCamera(){
   const g=new THREE.Group();
@@ -998,14 +1008,14 @@ for (const v of vStreets){ for (const h of hStreets){
   else if (r<0.30){ const p=makeRoundel(); p.position.set(px,0,pz); p.rotation.y=rnd()*6; furnitureGroup.add(p);}
   else if (r<0.38){ const p=makeUnionFlag(); p.position.set(px,0,pz); p.rotation.y=rnd()*6; furnitureGroup.add(p);}
 }}
-// traffic lights on two opposite corners of each busy junction
+// traffic lights on two opposite corners of each busy junction — one controls
+// N-S traffic (green in the NS phase), the other E-W
 for(const v of vStreets){ for(const h of hStreets){
   if(!(v.main && h.main)) continue;
-  const state = rnd()<0.5 ? 'green' : 'red';
   const c1x=v.c - v.w/2 - 2, c1z=h.c - h.w/2 - 2;
   const c2x=v.c + v.w/2 + 2, c2z=h.c + h.w/2 + 2;
-  if(!onRoad(c1x,c1z)){ const t=makeTrafficLight(state); t.position.set(c1x,0,c1z); t.rotation.y=Math.PI*0.25; furnitureGroup.add(t); }
-  if(!onRoad(c2x,c2z)){ const t=makeTrafficLight(state==='green'?'red':'green'); t.position.set(c2x,0,c2z); t.rotation.y=Math.PI*1.25; furnitureGroup.add(t); }
+  if(!onRoad(c1x,c1z)){ const t=makeTrafficLight(); t.group.position.set(c1x,0,c1z); t.group.rotation.y=Math.PI*0.25; furnitureGroup.add(t.group); trafficLights.push({set:t.set, axis:'NS'}); }
+  if(!onRoad(c2x,c2z)){ const t=makeTrafficLight(); t.group.position.set(c2x,0,c2z); t.group.rotation.y=Math.PI*1.25; furnitureGroup.add(t.group); trafficLights.push({set:t.set, axis:'EW'}); }
 }}
 // speed cameras along a few main roads
 [['CURZON STREET',false],['PARK LANE',true],['OXFORD STREET',false],['REGENT STREET',true]].forEach(([name,vertical])=>{
@@ -1108,9 +1118,32 @@ player.position.set(START.x, 0, START.z); player.rotation.y = START.ry;
 }
 scene.add(player);
 
-// headlight spotlights (subtle by day, adds a lit-front glow)
+// headlight spotlights (subtle by day, strong at night)
 const headlight = new THREE.SpotLight(0xfff2d0, 3.0, 55, Math.PI/5, 0.45, 1.2);
 headlight.position.set(0,1,-2); player.add(headlight); player.add(headlight.target); headlight.target.position.set(0,0,-12);
+// headlight + tail-light glows (shown at night)
+for(const sx of [-0.72,0.72]){ const hg=makeGlow(0xfff2c0,2.4); hg.position.set(sx,1.0,-2.42); player.add(hg); }
+for(const sx of [-0.72,0.72]){ const tg=makeGlow(0xff3322,1.7); tg.position.set(sx,1.05,2.42); player.add(tg); }
+
+// ---------- Day / Night ----------
+let night=false;
+function applyNight(on){
+  night=on;
+  if(on){
+    skyTop.set(0x0a1330); skyBot.set(0x1b2344); scene.background.set(0x111a30);
+    scene.fog.color.set(0x141d33); scene.fog.near=70; scene.fog.far=500;
+    sun.intensity=0.18; sun.color.set(0xaab6d6); hemi.intensity=0.22; hemi.color.set(0x44527a); hemi.groundColor.set(0x0e1016);
+    renderer.toneMappingExposure=1.0; headlight.intensity=8; scene.environment=nightEnv;
+  } else {
+    skyTop.set(0x6ea8dc); skyBot.set(0xcfe0ec); scene.background.set(0xcfe0ec);
+    scene.fog.color.set(0xbfd2e0); scene.fog.near=120; scene.fog.far=620;
+    sun.intensity=2.1; sun.color.set(0xfff2d6); hemi.intensity=0.85; hemi.color.set(0xbfd6ff); hemi.groundColor.set(0x505a52);
+    renderer.toneMappingExposure=1.18; headlight.intensity=3.0; scene.environment=dayEnv;
+  }
+  nightSprites.forEach(s=>s.visible=on);
+  lampHeadMat.emissiveIntensity = on?2.6:0.5;
+  showPlace(on?'Night':'Day');
+}
 
 setLoad(0.9, 'Waking the traffic…');
 
@@ -1168,7 +1201,20 @@ function updateAgent(a, dt, init){
     if (a.hit<=0){ a.mesh.rotation.set(0,0,0); a.mesh.position.y=0; respawnAgent(a); }
     return;
   }
-  a.pos += a.dir * a.speed * dt;
+  let move = a.dir * a.speed * dt;
+  // obey red lights at main junctions: hold at the stop line
+  const go = a.horizontal ? ewGo : nsGo;
+  if(!go){
+    const crosses = a.horizontal ? vStreets : hStreets;
+    let best=Infinity;
+    for(const s of crosses){ if(!s.main) continue;
+      const stopLine = s.c - a.dir*(s.w/2+2.5);
+      const ahead = (stopLine - a.pos)*a.dir;
+      if(ahead>-1.5 && ahead<best) best=ahead;
+    }
+    if(best<14) move = a.dir * Math.max(0, Math.min(Math.abs(move), best)); // brake to the line
+  }
+  a.pos += move;
   const lo = a.horizontal ? worldBounds.x0 : worldBounds.z0, hi = a.horizontal ? worldBounds.x1 : worldBounds.z1;
   if (a.pos > hi+20) a.pos = lo-20;
   if (a.pos < lo-20) a.pos = hi+20;
@@ -1239,6 +1285,7 @@ addEventListener('keydown', e=>{
   if(e.code==='KeyR') resetCar();
   if(e.code==='KeyH') horn();
   if(e.code==='KeyM'){ mirrorOn=!mirrorOn; document.getElementById('mirror').classList.toggle('off', !mirrorOn); }
+  if(e.code==='KeyN') applyNight(!night);
   if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
 });
 addEventListener('keyup', e=>{ keys[e.code]=false; });
@@ -1504,6 +1551,18 @@ function updateTaxi(dt){
 }
 let newJobSoon=1.0;
 
+// running a red light at speed inside a signalled junction costs a fine
+let redFineCd=0;
+function checkRedLight(dt){
+  if(redFineCd>0){ redFineCd-=dt; return; }
+  if(Math.abs(vehicle.speed)<14) return;
+  const ew = Math.abs(Math.sin(player.rotation.y)) > Math.abs(Math.cos(player.rotation.y));
+  if(ew ? ewGo : nsGo) return; // your light is green
+  const inV = vStreets.some(s=>s.main && Math.abs(player.position.x-s.c)<s.w/2+1);
+  const inH = hStreets.some(s=>s.main && Math.abs(player.position.z-s.c)<s.w/2+1);
+  if(inV && inH){ earnings=Math.max(0,earnings-20); cashEl.textContent=earnings; showPlace('Ran a red! −£20'); redFineCd=3; }
+}
+
 // ============================================================
 //  MAIN LOOP
 // ============================================================
@@ -1597,6 +1656,16 @@ function update(dt){
   // ----- taxi shift -----
   if(newJobSoon>0){ newJobSoon-=dt; if(newJobSoon<=0) newJob(); }
   updateTaxi(dt);
+
+  // ----- traffic signals (17s cycle: NS green → amber → EW green → amber) -----
+  signalTimer=(signalTimer+dt)%17;
+  { const t=signalTimer;
+    const nsState = t<7?'green':t<8.5?'amber':'red';
+    const ewState = t>=8.5?(t<15.5?'green':'amber'):'red';
+    for(const L of trafficLights) L.set(L.axis==='NS'?nsState:ewState);
+    nsGo = nsState==='green'; ewGo = ewState==='green';
+  }
+  checkRedLight(dt);
 
   // ----- traffic & peds -----
   for(const a of traffic) updateAgent(a, dt);
