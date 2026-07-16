@@ -20,6 +20,9 @@
   #mirror::after { content: attr(data-label); position: absolute; top: -15px; left: 50%; transform: translateX(-50%);
     font-size: 9px; letter-spacing: 2px; color: #fff; opacity: .45; white-space: nowrap; }
   #mirror.off { display: none; }
+  /* speed-camera flash */
+  #flash { position: fixed; inset: 0; background: #fff; opacity: 0; pointer-events: none; z-index: 6; transition: opacity .28s ease; }
+  #flash.on { opacity: .9; transition: none; }
 
   /* HUD */
   #hud { position: fixed; inset: 0; pointer-events: none; color: #fff; }
@@ -109,18 +112,35 @@
   .tbtn.pedal .arm { width: 12px; height: 26px; border-radius: 4px;
     background: linear-gradient(180deg,#c9ced6,#7d828b); box-shadow: inset 0 1px 0 rgba(255,255,255,.6); }
   .tbtn.pedal .pad { width: 74px; height: 118px; border-radius: 14px 14px 16px 16px;
-    border: 2px solid rgba(0,0,0,.35); position: relative; overflow: hidden;
+    border: 2px solid rgba(0,0,0,.5); position: relative; overflow: hidden;
     display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
-    background-image: repeating-linear-gradient(0deg, rgba(0,0,0,.35) 0 3px, rgba(255,255,255,.06) 3px 9px); }
+    background-color: #2a2d33;   /* black rubber pad */
+    background-image: repeating-linear-gradient(0deg, rgba(0,0,0,.55) 0 3px, rgba(255,255,255,.05) 3px 9px); }
   .tbtn.pedal .pad::after { content:''; position:absolute; inset:0; border-radius:12px;
-    background: linear-gradient(180deg, rgba(255,255,255,.22), rgba(255,255,255,0) 40%); pointer-events:none; }
+    background: linear-gradient(180deg, rgba(255,255,255,.16), rgba(255,255,255,0) 40%); pointer-events:none; }
   .tbtn.pedal .ico { font-size: 26px; line-height: 1; z-index:1; }
-  .tbtn.pedal .lbl { font-size: 11px; letter-spacing: 2px; z-index:1; }
-  .tbtn.pedal:active .pad { transform: translateY(3px); }
-  #t-gas   .pad { background-color: #1c7d3f; box-shadow: inset 0 0 0 2px rgba(120,255,170,.25); }
-  #t-brake .pad { background-color: #a5231c; height: 96px; box-shadow: inset 0 0 0 2px rgba(255,150,140,.25); }
+  .tbtn.pedal .lbl { font-size: 11px; letter-spacing: 2px; z-index:1; opacity:.9; }
+  .tbtn.pedal:active .pad { transform: translateY(3px); filter: brightness(1.3); }
+  #t-gas   .pad { height: 118px; box-shadow: inset 0 -3px 0 rgba(46,200,110,.55); }
+  #t-gas   .ico { color:#39d967; }
+  #t-brake .pad { height: 96px;  box-shadow: inset 0 -3px 0 rgba(255,80,70,.55); }
+  #t-brake .ico, #t-brake .lbl { color:#ff6a5e; }
 
   @media (hover: none) and (pointer: coarse) { #touch { display: block; } #help { display: none; } }
+  /* Compact / de-collided layout for phones */
+  @media (max-width: 640px) {
+    #mirror { width: 33vw; max-width: 210px; height: 18vw; max-height: 74px; top: 6px; border-width: 2px; }
+    #taxi { left: 8px; top: 8px; min-width: 0; max-width: 116px; padding: 7px 9px; }
+    #taxi .fare { font-size: 15px; } #taxi .fare .fares { display:block; }
+    #taxi .job { font-size: 10px; max-width: 104px; } #taxi .shift { font-size: 9.5px; }
+    #minimap { right: 8px; top: 8px; width: 74px; height: 74px; padding: 5px; }
+    #minimap .mm-tag { display:none; }
+    /* speed + bodywork stack bottom-left above the steering, clear of the pedals */
+    #speedo { right: auto; left: 8px; bottom: 126px; width: 116px; height: 64px; padding: 7px 11px; }
+    #speedo .val { font-size: 30px; } #speedo .unit { font-size:11px; } #speedo .gear { bottom: 9px; font-size:11px; }
+    #dmgwrap { right: auto; left: 8px; bottom: 198px; width: 140px; }
+    #place { top: auto; bottom: 210px; left: 50%; }
+  }
   /* let people force-show controls with ?touch=1 for testing */
   #touch.force { display: block; }
 </style>
@@ -129,6 +149,7 @@
 <div id="app"></div>
 <div id="vignette"></div>
 <div id="mirror" data-label="REAR VIEW"></div>
+<div id="flash"></div>
 
 <div id="hud">
   <div id="taxi" class="panel"><div class="shift" id="shift"></div><div class="fare">£<span id="cash">0</span> <span class="fares">· <span id="fares">0</span> fares</span></div><div class="job" id="jobtxt">Starting shift…</div><div class="jtimer" id="jobtimer"></div></div>
@@ -1061,14 +1082,15 @@ for(const v of vStreets){ for(const h of hStreets){
   if(!onRoad(c1x,c1z)){ const t=makeTrafficLight(); t.group.position.set(c1x,0,c1z); t.group.rotation.y=Math.PI*0.25; furnitureGroup.add(t.group); trafficLights.push({set:t.set, axis:'NS'}); }
   if(!onRoad(c2x,c2z)){ const t=makeTrafficLight(); t.group.position.set(c2x,0,c2z); t.group.rotation.y=Math.PI*1.25; furnitureGroup.add(t.group); trafficLights.push({set:t.set, axis:'EW'}); }
 }}
-// speed cameras along a few main roads
-[['CURZON STREET',false],['PARK LANE',true],['OXFORD STREET',false],['REGENT STREET',true]].forEach(([name,vertical])=>{
+// speed cameras along a few main roads (recorded so they can flash you)
+const speedCams=[];
+[['CURZON STREET',false],['PARK LANE',true],['OXFORD STREET',false],['REGENT STREET',true],['MOUNT STREET',false],['NEW BOND STREET',true]].forEach(([name,vertical])=>{
   const s = vertical ? vStreets.find(t=>t.name===name) : hStreets.find(t=>t.name===name);
   if(!s) return;
   const cam=makeSpeedCamera();
   if(vertical){ cam.position.set(s.c - s.w/2 - 2, 0, midZ + 30); cam.rotation.y=Math.PI/2; }
   else { cam.position.set(midX - 30, 0, s.c - s.w/2 - 2); }
-  if(!onRoad(cam.position.x,cam.position.z)) furnitureGroup.add(cam);
+  if(!onRoad(cam.position.x,cam.position.z)){ furnitureGroup.add(cam); speedCams.push({x:cam.position.x, z:cam.position.z, cd:0}); }
 });
 
 // ---------- Side parking: simple cars parked along the kerbs ----------
@@ -1453,19 +1475,37 @@ for(let k=0;k<48;k++){
 const cyclists=[];
 function makeCyclist(){
   const g=new THREE.Group();
-  const frame=new THREE.MeshStandardMaterial({color:new THREE.Color().setHSL(Math.random(),0.6,0.45), roughness:0.4, metalness:0.5});
-  const tyre=new THREE.MeshStandardMaterial({color:0x111, roughness:0.8});
-  const wF=new THREE.Mesh(new THREE.TorusGeometry(0.42,0.06,8,18), tyre); wF.position.set(0,0.42,-0.6); g.add(wF);
-  const wR=new THREE.Mesh(new THREE.TorusGeometry(0.42,0.06,8,18), tyre); wR.position.set(0,0.42,0.6); g.add(wR);
-  const bar=new THREE.Mesh(new THREE.CylinderGeometry(0.04,0.04,1.2,6), frame); bar.rotation.x=Math.PI/2; bar.position.set(0,0.7,0); g.add(bar);
-  const seat=new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.05,0.5,6), frame); seat.position.set(0,0.85,0.4); g.add(seat);
-  // rider
+  const col=new THREE.Color().setHSL(Math.random(),0.6,0.45);
+  const frame=new THREE.MeshStandardMaterial({color:col, roughness:0.4, metalness:0.55});
+  const tyre=new THREE.MeshStandardMaterial({color:0x141414, roughness:0.8});
+  // wheels: thin discs, axle along X, in a group so they can roll about X
+  function wheel(z){ const grp=new THREE.Group(); const disc=new THREE.Mesh(new THREE.CylinderGeometry(0.4,0.4,0.05,18), tyre); disc.rotation.z=Math.PI/2; grp.add(disc); grp.position.set(0,0.4,z); g.add(grp); return grp; }
+  const wF=wheel(-0.62), wR=wheel(0.62);
+  // frame tubes connecting the hubs to the seat post and handlebars
+  const tube=(ax,ay,az,bx,by,bz,r)=>{ const a=new THREE.Vector3(ax,ay,az), b=new THREE.Vector3(bx,by,bz); const len=a.distanceTo(b);
+    const m=new THREE.Mesh(new THREE.CylinderGeometry(r||0.035,r||0.035,len,6), frame); m.position.copy(a).lerp(b,0.5);
+    m.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), b.clone().sub(a).normalize()); g.add(m); };
+  const crankY=0.42, crankZ=0.02, seatT=[0,0.82,0.12], barT=[0,0.9,-0.5];
+  tube(0,0.42,0.62, ...seatT);            // rear hub → seat
+  tube(0,0.42,0.62, crankZ*0+0,crankY,crankZ); // rear hub → crank (chainstay)
+  tube(...seatT, crankZ*0+0,crankY,crankZ);// seat tube down to crank
+  tube(...seatT, ...barT);                 // top tube seat → bars
+  tube(0,0.42,-0.62, ...barT);             // front fork → bars
+  const seat=new THREE.Mesh(new THREE.BoxGeometry(0.12,0.06,0.32), new THREE.MeshStandardMaterial({color:0x0e0e0e})); seat.position.set(0,0.86,0.12); g.add(seat);
+  const bars=new THREE.Mesh(new THREE.CylinderGeometry(0.028,0.028,0.42,6), frame); bars.rotation.z=Math.PI/2; bars.position.set(0,0.95,-0.5); g.add(bars);
+  // rider (sitting): pelvis on the seat, torso leaning to the bars
   const skin=new THREE.MeshStandardMaterial({color:skinCols[(Math.random()*skinCols.length)|0], roughness:0.8});
-  const shirt=new THREE.MeshStandardMaterial({color:new THREE.Color().setHSL(Math.random(),0.5,0.45), roughness:0.9});
-  const torso=new THREE.Mesh(new THREE.CapsuleGeometry(0.18,0.34,4,8), shirt); torso.position.set(0,1.28,0.15); torso.rotation.x=-0.5; torso.castShadow=true; g.add(torso);
-  const head=new THREE.Mesh(new THREE.SphereGeometry(0.17,12,10), skin); head.position.set(0,1.62,-0.1); g.add(head);
-  const helmet=new THREE.Mesh(new THREE.SphereGeometry(0.19,12,8,0,Math.PI*2,0,Math.PI/2), new THREE.MeshStandardMaterial({color:0xe23b2e, roughness:0.5})); helmet.position.set(0,1.66,-0.1); g.add(helmet);
-  g.userData={wF,wR};
+  const shirt=new THREE.MeshStandardMaterial({color:new THREE.Color().setHSL(Math.random(),0.5,0.46), roughness:0.9});
+  const trouser=new THREE.MeshStandardMaterial({color:0x272f38, roughness:0.9});
+  const torso=new THREE.Mesh(new THREE.CapsuleGeometry(0.15,0.36,4,8), shirt); torso.position.set(0,1.06,-0.05); torso.rotation.x=-0.62; torso.castShadow=true; g.add(torso);
+  const head=new THREE.Mesh(new THREE.SphereGeometry(0.145,12,10), skin); head.position.set(0,1.34,-0.34); g.add(head);
+  const helmet=new THREE.Mesh(new THREE.SphereGeometry(0.16,12,8,0,Math.PI*2,0,Math.PI*0.62), new THREE.MeshStandardMaterial({color:col, roughness:0.5})); helmet.position.set(0,1.37,-0.34); g.add(helmet);
+  for(const sx of [-0.12,0.12]){ const arm=new THREE.Mesh(new THREE.CapsuleGeometry(0.042,0.32,4,6), shirt); arm.position.set(sx,1.12,-0.3); arm.rotation.x=0.95; g.add(arm); }
+  // legs pivot at the seat, reaching down to the pedals (animated)
+  const legL=new THREE.Group(), legR=new THREE.Group();
+  for(const lg of [legL,legR]){ const t=new THREE.Mesh(new THREE.CapsuleGeometry(0.058,0.36,4,6), trouser); t.position.y=-0.2; t.castShadow=true; lg.add(t); }
+  legL.position.set(0.1,0.86,0.06); legR.position.set(-0.1,0.86,0.06); legL.rotation.x=0.7; legR.rotation.x=0.4; g.add(legL); g.add(legR);
+  g.userData={wF,wR,legL,legR,crank:Math.random()*6};
   scene.add(g);
   return g;
 }
@@ -1775,7 +1815,7 @@ function newJob(){
   job={stage:'toPickup', from, to, fare:Math.round(4+dist*0.09)};
   setBeam(from.x,from.z,0x2ecc71);
   passenger.position.set(from.x,0,from.z); passenger.visible=true;
-  jobEl.textContent='Pick up on '+from.name;
+  jobEl.textContent='▲ Pick up · '+from.name;
 }
 function updateTaxi(dt){
   if(!job) return;
@@ -1790,7 +1830,7 @@ function updateTaxi(dt){
       // on-time target based on the remaining distance to the destination
       const dd=Math.hypot(job.to.x-player.position.x, job.to.z-player.position.z);
       job.timeLimit=Math.max(20, dd/12+14); job.timeLeft=job.timeLimit; job.dmgStart=damage;
-      jobEl.textContent='Drop off on '+job.to.name+'  ·  £'+job.fare;
+      jobEl.textContent='▼ '+job.to.name+' · £'+job.fare;
       showPlace('Passenger in — to '+job.to.name+' (£'+job.fare+')'); horn();
     }
   } else {
@@ -1844,6 +1884,8 @@ seBtn.addEventListener('click', startShift);
 
 // running a red light at speed inside a signalled junction costs a fine
 let redFineCd=0;
+const flashEl=document.getElementById('flash');
+function cameraFlash(){ flashEl.classList.add('on'); requestAnimationFrame(()=>requestAnimationFrame(()=>flashEl.classList.remove('on'))); }
 function checkRedLight(dt){
   if(redFineCd>0){ redFineCd-=dt; return; }
   if(Math.abs(vehicle.speed)<14) return;
@@ -1851,7 +1893,19 @@ function checkRedLight(dt){
   if(ew ? ewGo : nsGo) return; // your light is green
   const inV = vStreets.some(s=>s.main && Math.abs(player.position.x-s.c)<s.w/2+1);
   const inH = hStreets.some(s=>s.main && Math.abs(player.position.z-s.c)<s.w/2+1);
-  if(inV && inH){ earnings=Math.max(0,earnings-20); cashEl.textContent=earnings; showPlace('Ran a red! −£20'); redFineCd=3; }
+  if(inV && inH){ if(shiftActive) earnings=Math.max(0,earnings-20), cashEl.textContent=earnings; cameraFlash(); showPlace('📸 Ran a red! −£20'); redFineCd=3; }
+}
+// speed cameras flash (and fine) if you blast past them
+function checkSpeedCameras(dt){
+  const speeding = Math.abs(vehicle.speed) > 20;   // ~42 mph
+  for(const c of speedCams){
+    if(c.cd>0){ c.cd-=dt; continue; }
+    const dx=player.position.x-c.x, dz=player.position.z-c.z;
+    if(speeding && dx*dx+dz*dz < 100){
+      cameraFlash(); if(shiftActive){ earnings=Math.max(0,earnings-30); cashEl.textContent=earnings; }
+      showPlace('📸 Speeding! −£30'); c.cd=5;
+    }
+  }
 }
 
 // ============================================================
@@ -1962,6 +2016,7 @@ function update(dt){
     nsGo = nsState==='green'; ewGo = ewState==='green';
   }
   checkRedLight(dt);
+  checkSpeedCameras(dt);
 
   // ----- traffic & peds -----
   for(const a of traffic) updateAgent(a, dt);
@@ -1982,7 +2037,9 @@ function update(dt){
     if(c.pos>chi){c.pos=clo;} if(c.pos<clo){c.pos=chi;}
     if(c.horizontal){ c.mesh.position.set(c.pos,0,c.line+c.side); c.mesh.rotation.y=c.dir>0?Math.PI/2:-Math.PI/2;}
     else { c.mesh.position.set(c.line+c.side,0,c.pos); c.mesh.rotation.y=c.dir>0?0:Math.PI;}
-    const spin=c.speed*dt/0.42; c.mesh.userData.wF.rotation.x+=spin; c.mesh.userData.wR.rotation.x+=spin;
+    const u=c.mesh.userData, spin=c.speed*dt/0.42;
+    u.wF.rotation.x+=spin; u.wR.rotation.x+=spin;
+    u.crank+=spin*0.5; u.legL.rotation.x=0.55+Math.sin(u.crank)*0.35; u.legR.rotation.x=0.55-Math.sin(u.crank)*0.35;
   }
 
   // ----- camera & sun follow -----
@@ -2016,7 +2073,7 @@ addEventListener('resize', ()=>{
 // optional test hook
 if(/[?&]dbg=1/.test(location.search)){
   window.__dbg = { get damage(){return damage;}, get shake(){return shake;}, traffic, player, addDamage,
-    newJob, get job(){return job;}, get beamVisible(){return beamGroup.visible;} };
+    newJob, get job(){return job;}, get beamVisible(){return beamGroup.visible;}, cyclists, cameraFlash, get flashOn(){return flashEl.classList.contains('on');} };
 }
 // kick off after a short beat so the loader shows
 requestAnimationFrame(frame);
