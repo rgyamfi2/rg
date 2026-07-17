@@ -940,15 +940,63 @@ function makeUnionFlag(){
   return g;
 }
 
-// London Underground roundel sign on a post
-function makeRoundel(){
+// London Underground roundel — blue name bar with white text on a canvas
+const roundelBarCache={};
+function roundelBarTex(name){
+  if(roundelBarCache[name]) return roundelBarCache[name];
+  const c=document.createElement('canvas'); c.width=512; c.height=120; const x=c.getContext('2d');
+  x.fillStyle='#10069F'; x.fillRect(0,0,512,120);
+  x.fillStyle='#ffffff'; x.textAlign='center'; x.textBaseline='middle';
+  // shrink font to fit long names
+  let fs=64; x.font='bold '+fs+'px Arial'; while(x.measureText(name).width>476 && fs>22){ fs-=3; x.font='bold '+fs+'px Arial'; }
+  x.fillText(name,256,64);
+  const t=new THREE.CanvasTexture(c); t.anisotropy=4;
+  return roundelBarCache[name]=t;
+}
+// London Underground roundel sign on a post (name optional -> station name on bar)
+function makeRoundel(name){
   const g = new THREE.Group();
   const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.12,0.12,4.6,8), new THREE.MeshStandardMaterial({color:0x30343a, metalness:0.4, roughness:0.6}));
   pole.position.y=2.3; g.add(pole);
-  const ring = new THREE.Mesh(new THREE.TorusGeometry(1.1,0.34,10,28), new THREE.MeshStandardMaterial({color:0xE1251B, roughness:0.5}));
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(1.1,0.34,10,28), new THREE.MeshStandardMaterial({color:0xE1251B, roughness:0.4, emissive:0xE1251B, emissiveIntensity:0.12}));
   ring.position.y=5; g.add(ring);
-  const bar = new THREE.Mesh(new THREE.BoxGeometry(3.0,0.7,0.15), new THREE.MeshStandardMaterial({color:0x10069F, roughness:0.5}));
+  const disc = new THREE.Mesh(new THREE.CircleGeometry(0.82,24), new THREE.MeshStandardMaterial({color:0xffffff, roughness:0.5}));
+  disc.position.set(0,5,0.01); g.add(disc);
+  const disc2 = disc.clone(); disc2.position.z=-0.01; disc2.rotation.y=Math.PI; g.add(disc2);
+  const barMat = name
+    ? new THREE.MeshStandardMaterial({map:roundelBarTex(name), roughness:0.45, emissive:0x10069F, emissiveIntensity:0.18})
+    : new THREE.MeshStandardMaterial({color:0x10069F, roughness:0.5});
+  const bar = new THREE.Mesh(new THREE.BoxGeometry(3.4,0.8,0.14), barMat);
   bar.position.y=5; bar.position.z=0.02; g.add(bar);
+  return g;
+}
+// A proper Underground station entrance: tiled portal, illuminated frieze + roundel
+const undergroundFriezeCache={};
+function undergroundFriezeTex(){
+  if(undergroundFriezeCache.t) return undergroundFriezeCache.t;
+  const c=document.createElement('canvas'); c.width=512; c.height=96; const x=c.getContext('2d');
+  x.fillStyle='#10069F'; x.fillRect(0,0,512,96);
+  x.fillStyle='#ffffff'; x.textAlign='center'; x.textBaseline='middle';
+  x.font='bold 60px Arial'; x.fillText('UNDERGROUND',256,52);
+  return undergroundFriezeCache.t=new THREE.CanvasTexture(c);
+}
+function makeTubeStation(name){
+  const g=new THREE.Group();
+  const stone=new THREE.MeshStandardMaterial({color:0x9a3324, roughness:0.7}); // ox-blood faience
+  const cream=new THREE.MeshStandardMaterial({color:0xd8cdba, roughness:0.8});
+  // entrance facade block with a recessed dark opening
+  const facade=new THREE.Mesh(new THREE.BoxGeometry(9,7,1.2), stone); facade.position.set(0,3.5,0); facade.castShadow=true; g.add(facade);
+  const jambL=new THREE.Mesh(new THREE.BoxGeometry(1.4,7,1.6), stone); jambL.position.set(-3.6,3.5,0.2); g.add(jambL);
+  const jambR=jambL.clone(); jambR.position.x=3.6; g.add(jambR);
+  const opening=new THREE.Mesh(new THREE.BoxGeometry(5,5.6,0.5), new THREE.MeshStandardMaterial({color:0x0c0d10, roughness:0.9})); opening.position.set(0,3.0,0.62); g.add(opening);
+  // illuminated UNDERGROUND frieze band above the doors
+  const frieze=new THREE.Mesh(new THREE.BoxGeometry(6.6,0.95,0.2), new THREE.MeshStandardMaterial({map:undergroundFriezeTex(), emissive:0x2233ff, emissiveIntensity:0.5, roughness:0.4}));
+  frieze.position.set(0,6.1,0.7); g.add(frieze);
+  const friezeGlow=makeGlow(0x4466ff,7); friezeGlow.position.set(0,6.1,1.1); g.add(friezeGlow);
+  // cornice
+  const cornice=new THREE.Mesh(new THREE.BoxGeometry(9.6,0.5,1.6), cream); cornice.position.set(0,7.2,0.1); g.add(cornice);
+  // free-standing roundel on a post beside the entrance, carrying the station name
+  const r=makeRoundel(name); r.position.set(6.2,0,0.4); g.add(r);
   return g;
 }
 
@@ -1016,19 +1064,35 @@ function makePostBox(){
   const top = new THREE.Mesh(new THREE.SphereGeometry(0.7,16,8,0,Math.PI*2,0,Math.PI/2), red); top.position.y=2.6; g.add(top);
   return g;
 }
-// UK traffic signal — controllable (returns {group,set})
+// UK traffic signal — controllable (returns {group,set}). Aspects face +Z.
+const signalHoodMat=new THREE.MeshStandardMaterial({color:0x0c0d0f, roughness:0.7});
 function makeTrafficLight(){
   const g=new THREE.Group();
-  const pole=new THREE.Mesh(new THREE.CylinderGeometry(0.12,0.16,5.2,10), new THREE.MeshStandardMaterial({color:0x23262b, metalness:0.5, roughness:0.5}));
-  pole.position.y=2.6; pole.castShadow=true; g.add(pole);
-  const housing=new THREE.Mesh(new THREE.BoxGeometry(0.7,2.0,0.5), new THREE.MeshStandardMaterial({color:0x181a1d, roughness:0.6}));
-  housing.position.set(0,5.4,0.25); g.add(housing);
-  const cols=[['#ff2a1a',0.65],['#ffb400',0],['#25d24a',-0.65]]; const mats=[];
+  const pole=new THREE.Mesh(new THREE.CylinderGeometry(0.13,0.17,5.6,10), new THREE.MeshStandardMaterial({color:0x23262b, metalness:0.5, roughness:0.5}));
+  pole.position.y=2.8; pole.castShadow=true; g.add(pole);
+  // black backboard with white border for contrast, then the housing box
+  const board=new THREE.Mesh(new THREE.BoxGeometry(1.05,2.55,0.12), new THREE.MeshStandardMaterial({color:0xf4f4f4, roughness:0.7}));
+  board.position.set(0,5.6,0.16); g.add(board);
+  const housing=new THREE.Mesh(new THREE.BoxGeometry(0.82,2.4,0.42), new THREE.MeshStandardMaterial({color:0x111214, roughness:0.6}));
+  housing.position.set(0,5.6,0.28); housing.castShadow=true; g.add(housing);
+  const cols=[['#ff2a1a',0.72],['#ffb400',0],['#2ff04a',-0.72]]; const mats=[]; const glows=[];
   cols.forEach(([hex,dy])=>{
-    const mat=new THREE.MeshStandardMaterial({color:hex, emissive:hex, emissiveIntensity:0.04});
-    const m=new THREE.Mesh(new THREE.CircleGeometry(0.2,16), mat); m.position.set(0,5.4+dy,0.51); g.add(m); mats.push(mat);
+    const y=5.6+dy;
+    // dark bezel behind each lens
+    const bez=new THREE.Mesh(new THREE.CylinderGeometry(0.31,0.31,0.06,18), signalHoodMat); bez.rotation.x=Math.PI/2; bez.position.set(0,y,0.5); g.add(bez);
+    const mat=new THREE.MeshStandardMaterial({color:hex, emissive:hex, emissiveIntensity:0.05, roughness:0.35});
+    const m=new THREE.Mesh(new THREE.CircleGeometry(0.26,20), mat); m.position.set(0,y,0.54); g.add(m); mats.push(mat);
+    // curved hood/visor over the lens
+    const hood=new THREE.Mesh(new THREE.CylinderGeometry(0.34,0.34,0.34,16,1,true,Math.PI*0.05,Math.PI*0.9), signalHoodMat);
+    hood.position.set(0,y+0.12,0.56); g.add(hood);
+    // additive glow sprite, lit only when this aspect is active
+    const gl=new THREE.Sprite(new THREE.SpriteMaterial({map:glowTex, color:hex, transparent:true, opacity:0.9, depthWrite:false, blending:THREE.AdditiveBlending}));
+    gl.scale.set(1.5,1.5,1.5); gl.position.set(0,y,0.62); gl.visible=false; g.add(gl); glows.push(gl);
   });
-  function set(s){ mats[0].emissiveIntensity=s==='red'?1.5:0.04; mats[1].emissiveIntensity=s==='amber'?1.5:0.04; mats[2].emissiveIntensity=s==='green'?1.5:0.04; }
+  function set(s){
+    const on=[s==='red',s==='amber',s==='green'];
+    for(let i=0;i<3;i++){ mats[i].emissiveIntensity=on[i]?2.6:0.05; glows[i].visible=on[i]; }
+  }
   set('red');
   return { group:g, set };
 }
@@ -1073,15 +1137,59 @@ for (const v of vStreets){ for (const h of hStreets){
   else if (r<0.30){ const p=makeRoundel(); p.position.set(px,0,pz); p.rotation.y=rnd()*6; furnitureGroup.add(p);}
   else if (r<0.38){ const p=makeUnionFlag(); p.position.set(px,0,pz); p.rotation.y=rnd()*6; furnitureGroup.add(p);}
 }}
-// traffic lights on two opposite corners of each busy junction — one controls
-// N-S traffic (green in the NS phase), the other E-W
+// Traffic lights at every busy junction — one on each of the four approach
+// corners, each rotated to FACE the oncoming traffic on its arm. NS lights
+// control cars travelling along Z (vertical streets); EW lights control X.
+// Aspects face local +Z, so rotation.y aims the face down the approach.
+function placeSignal(x,z,roty,axis){
+  if(onRoad(x,z)) return;
+  const t=makeTrafficLight(); t.group.position.set(x,0,z); t.group.rotation.y=roty;
+  furnitureGroup.add(t.group); trafficLights.push({set:t.set, axis});
+}
 for(const v of vStreets){ for(const h of hStreets){
   if(!(v.main && h.main)) continue;
-  const c1x=v.c - v.w/2 - 2, c1z=h.c - h.w/2 - 2;
-  const c2x=v.c + v.w/2 + 2, c2z=h.c + h.w/2 + 2;
-  if(!onRoad(c1x,c1z)){ const t=makeTrafficLight(); t.group.position.set(c1x,0,c1z); t.group.rotation.y=Math.PI*0.25; furnitureGroup.add(t.group); trafficLights.push({set:t.set, axis:'NS'}); }
-  if(!onRoad(c2x,c2z)){ const t=makeTrafficLight(); t.group.position.set(c2x,0,c2z); t.group.rotation.y=Math.PI*1.25; furnitureGroup.add(t.group); trafficLights.push({set:t.set, axis:'EW'}); }
+  const vhw=v.w/2, hhw=h.w/2, o=2.2;
+  const xl=v.c-vhw-o, xr=v.c+vhw+o, zb=h.c-hhw-o, zt=h.c+hhw+o;
+  // car travelling +Z approaches from the -Z side -> face -Z (rot=π), left kerb (-X)
+  placeSignal(xl, zb, Math.PI, 'NS');
+  // car travelling -Z -> face +Z (rot=0), its left kerb (+X)
+  placeSignal(xr, zt, 0, 'NS');
+  // car travelling +X -> face -X (rot=-π/2), its left kerb (+Z)
+  placeSignal(xl, zt, -Math.PI/2, 'EW');
+  // car travelling -X -> face +X (rot=π/2), its left kerb (-Z)
+  placeSignal(xr, zb, Math.PI/2, 'EW');
+  // Pedestrian (zebra-style) crossings across each arm just outside the junction
+  const cw=1.0;
+  // across the vertical street on the north & south sides
+  for(const zc of [h.c-hhw-4.0, h.c+hhw+4.0]){
+    for(let i=0;i<5;i++){ const off=(-2+i)*1.5; const m=addFlat(new THREE.PlaneGeometry(v.w-1.4,cw), lineMat, v.c, zc+off, 0); m.position.y=roadY+0.03; }
+  }
+  // across the horizontal street on the east & west sides
+  for(const xc of [v.c-vhw-4.0, v.c+vhw+4.0]){
+    for(let i=0;i<5;i++){ const off=(-2+i)*1.5; const m=addFlat(new THREE.PlaneGeometry(cw,h.w-1.4), lineMat, xc+off, h.c, 0); m.position.y=roadY+0.03; }
+  }
 }}
+// Real Underground station entrances at their true Mayfair-edge locations.
+// Each sits on the pavement corner of a junction, entrance facing the main
+// vertical street (sx = which side of that street; sz = which corner).
+[
+  ['BOND STREET',      getV('NEW BOND STREET'), getH('OXFORD STREET'),  1,  1],
+  ['GREEN PARK',       getV('BERKELEY STREET'), getH('PICCADILLY'),    -1, -1],
+  ['OXFORD CIRCUS',    getV('REGENT STREET'),   getH('OXFORD STREET'), -1,  1],
+  ['MARBLE ARCH',      getV('PARK LANE'),       getH('OXFORD STREET'),  1,  1],
+  ['HYDE PARK CORNER', getV('PARK LANE'),       getH('PICCADILLY'),     1, -1],
+  ['PICCADILLY CIRCUS',getV('REGENT STREET'),   getH('PICCADILLY'),    -1, -1],
+].forEach(([name,v,h,sx,sz])=>{
+  if(!v||!h) return;
+  const x = v.c + sx*(v.w/2 + 3.2);   // just onto the pavement, off the carriageway
+  const z = h.c + sz*(h.w/2 + 9);     // set back along the street from the corner
+  if(onRoad(x,z)) return;
+  const st=makeTubeStation(name);
+  st.position.set(x,0,z);
+  // entrance (local +Z) faces the vertical street: -X when east of it, +X when west
+  st.rotation.y = sx>0 ? -Math.PI/2 : Math.PI/2;
+  furnitureGroup.add(st);
+});
 // speed cameras along a few main roads (recorded so they can flash you)
 const speedCams=[];
 [['CURZON STREET',false],['PARK LANE',true],['OXFORD STREET',false],['REGENT STREET',true],['MOUNT STREET',false],['NEW BOND STREET',true]].forEach(([name,vertical])=>{
